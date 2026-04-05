@@ -16,10 +16,10 @@ router.get("/download/:id", async (req, res) => {
     }
     const file = rows[0]!;
     await db.update(filesTable).set({ accessCount: (file.accessCount || 0) + 1 }).where(eq(filesTable.id, file.id));
-    await streamTelegramFile(req, res, file.fileId, file.mimeType, file.fileName, file.fileSize, true);
+    await streamTelegramFile(req, res, file.chatId, file.messageId, file.mimeType, file.fileName, file.fileSize, true);
   } catch (err) {
     req.log.error({ err }, "Download error");
-    res.status(500).send("Server error");
+    if (!res.headersSent) res.status(500).send("Server error");
   }
 });
 
@@ -32,10 +32,10 @@ router.get("/stream/:id", async (req, res) => {
     }
     const file = rows[0]!;
     await db.update(filesTable).set({ accessCount: (file.accessCount || 0) + 1 }).where(eq(filesTable.id, file.id));
-    await streamTelegramFile(req, res, file.fileId, file.mimeType, file.fileName, file.fileSize, false);
+    await streamTelegramFile(req, res, file.chatId, file.messageId, file.mimeType, file.fileName, file.fileSize, false);
   } catch (err) {
     req.log.error({ err }, "Stream error");
-    res.status(500).send("Server error");
+    if (!res.headersSent) res.status(500).send("Server error");
   }
 });
 
@@ -77,7 +77,7 @@ router.get("/stream-page/:id", async (req, res) => {
     } else if (isImage) {
       mediaPlayer = `
         <div class="media-container image-container">
-          <img src="${streamUrl}" alt="${fileLabel}" loading="lazy" />
+          <img src="${streamUrl}" alt="${escHtml(fileLabel)}" loading="lazy" />
         </div>`;
     } else {
       mediaPlayer = `
@@ -93,7 +93,7 @@ router.get("/stream-page/:id", async (req, res) => {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>${fileLabel} — File2Link BOT</title>
+  <title>${escHtml(fileLabel)} — File2Link BOT</title>
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Manrope:wght@400;500;700;800&display=swap');
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -102,7 +102,6 @@ router.get("/stream-page/:id", async (req, res) => {
       --neon-2: #b7ff00;
       --glow: rgba(0, 255, 106, 0.35);
       --bg: #030403;
-      --panel: rgba(8, 16, 10, 0.9);
       --border: rgba(0, 255, 106, 0.18);
       --text: #effff3;
       --muted: #9ac8a4;
@@ -141,11 +140,6 @@ router.get("/stream-page/:id", async (req, res) => {
       text-shadow: 0 0 18px var(--glow);
     }
     .logo span { color: var(--neon); }
-    .chip {
-      font-size: .72rem; letter-spacing: 2px; color: var(--neon);
-      border: 1px solid var(--border); padding: 6px 10px; border-radius: 999px;
-      background: rgba(0,255,106,.06);
-    }
     .card {
       width: 100%; max-width: 940px; padding: 30px;
       background: linear-gradient(180deg, rgba(8,16,10,.95), rgba(3,5,4,.92));
@@ -165,20 +159,22 @@ router.get("/stream-page/:id", async (req, res) => {
       border: 1px solid rgba(0,255,106,.18); background: rgba(0,0,0,.28);
       padding: 6px 10px; border-radius: 999px;
     }
-    .tag.hot { color: #000; background: linear-gradient(135deg, var(--neon), var(--neon-2)); border-color: transparent; }
+    .tag.hot { color: #001406; background: linear-gradient(135deg, var(--neon), var(--neon-2)); border-color: transparent; }
     .media-container { margin: 22px 0; border-radius: 22px; overflow: hidden; border: 1px solid rgba(0,255,106,.14); background: #000; }
-    video, audio, img { width: 100%; display: block; }
+    video, audio { width: 100%; display: block; }
     .audio-container { padding: 28px; display: grid; place-items: center; gap: 18px; background: linear-gradient(180deg, rgba(2,8,3,.95), rgba(0,0,0,.95)); }
     .audio-icon { font-size: 3.6rem; filter: drop-shadow(0 0 18px var(--glow)); }
-    .image-container { padding: 10px; }
-    .image-container img { max-height: 700px; object-fit: contain; }
-    .no-preview { padding: 54px 20px; text-align: center; color: var(--muted); }
+    .audio-container audio { width: 100%; }
+    .image-container { padding: 10px; display: flex; justify-content: center; }
+    .image-container img { max-width: 100%; max-height: 700px; object-fit: contain; }
+    .no-preview { padding: 54px 20px; text-align: center; color: var(--muted); display: flex; flex-direction: column; align-items: center; gap: 12px; }
+    .no-preview-icon { font-size: 3.5rem; }
     .actions { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 20px; }
     .btn {
       display: inline-flex; align-items: center; justify-content: center; gap: 10px;
       padding: 14px 22px; border-radius: 16px; text-decoration: none;
       font-family: 'Manrope', sans-serif; font-weight: 800; letter-spacing: .8px;
-      border: 1px solid transparent; transition: transform .15s ease, box-shadow .15s ease, background .15s ease;
+      border: 1px solid transparent; transition: transform .15s ease, box-shadow .15s ease;
     }
     .btn:hover { transform: translateY(-1px); }
     .btn-primary {
@@ -186,10 +182,7 @@ router.get("/stream-page/:id", async (req, res) => {
       background: linear-gradient(135deg, var(--neon), var(--neon-2));
       box-shadow: 0 0 0 1px rgba(255,255,255,.05), 0 0 26px rgba(0,255,106,.22);
     }
-    .btn-primary:hover { box-shadow: 0 0 34px rgba(0,255,106,.34); }
-    .btn-ghost {
-      color: #dfffe6; background: rgba(255,255,255,.04); border-color: rgba(0,255,106,.16);
-    }
+    .btn-primary:hover { box-shadow: 0 0 34px rgba(0,255,106,.38); }
     footer { margin-top: 28px; color: var(--muted); font-size: .76rem; letter-spacing: 1.2px; }
     @media (max-width: 640px) {
       .card { padding: 20px; border-radius: 22px; }
@@ -202,7 +195,6 @@ router.get("/stream-page/:id", async (req, res) => {
 <body>
   <header>
     <a class="logo" href="/">File2Link<span>BOT</span></a>
-    <div class="chip">PREMIUM PLAYER</div>
   </header>
   <div class="card">
     <div class="meta">
@@ -217,10 +209,10 @@ router.get("/stream-page/:id", async (req, res) => {
     </div>
     ${mediaPlayer}
     <div class="actions">
-      <a class="btn btn-primary" href="${downloadUrl}" download="${escHtml(fileLabel)}">⬇ Download</a>
+      <a class="btn btn-primary" href="${downloadUrl}" download="${escHtml(fileLabel)}">⬇️ Download</a>
+      ${(isVideo || isAudio) ? `<a class="btn btn-primary" href="${streamUrl}" target="_blank" style="background:linear-gradient(135deg,#00bfff,#0070c0);color:#fff;">▶️ Direct Stream</a>` : ""}
     </div>
   </div>
-  <footer>File2Link BOT · neon delivery</footer>
 </body>
 </html>`;
 
@@ -229,7 +221,7 @@ router.get("/stream-page/:id", async (req, res) => {
     res.send(html);
   } catch (err) {
     req.log.error({ err }, "Stream page error");
-    res.status(500).send("Server error");
+    if (!res.headersSent) res.status(500).send("Server error");
   }
 });
 

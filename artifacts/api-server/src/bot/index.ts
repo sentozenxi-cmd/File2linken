@@ -1,4 +1,4 @@
-import { Telegraf, Markup } from "telegraf";
+import { Telegraf } from "telegraf";
 import { db, filesTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { isStreamable, isAudio, generateFileId } from "../lib/fileUtils.js";
@@ -23,12 +23,6 @@ async function logToChannel(message: string): Promise<void> {
   }
 }
 
-function replyMarkup(downloadUrl: string, streamUrl?: string) {
-  const buttons = [[Markup.button.url("⬇️ Download", downloadUrl)]];
-  if (streamUrl) buttons.push([Markup.button.url("❤️ Stream", streamUrl)]);
-  return Markup.inlineKeyboard(buttons);
-}
-
 bot.start(async (ctx) => {
   const startParam = ctx.startPayload;
   if (startParam) {
@@ -41,10 +35,14 @@ bot.start(async (ctx) => {
         const streamable = file.isStreamable || isStreamable(file.mimeType);
         const audioFile = file.isAudio || isAudio(file.mimeType);
         const fileLabel = file.fileName || "File";
-        let msg = `<b>📁 ${fileLabel}</b>\n\n`;
-        if (file.mimeType) msg += `Type: <code>${file.mimeType}</code>\n`;
-        if (file.fileSize) msg += `Size: ${formatSize(file.fileSize)}\n`;
-        await ctx.replyWithHTML(msg, replyMarkup(`${baseUrl}/api/download/${file.id}`, streamable || audioFile ? `${baseUrl}/api/stream-page/${file.id}` : undefined));
+        let msg = `📁 <b>${fileLabel}</b>\n`;
+        if (file.mimeType) msg += `🗂 Type: <code>${file.mimeType}</code>\n`;
+        if (file.fileSize) msg += `📦 Size: ${formatSize(file.fileSize)}\n`;
+        msg += `\n⬇️ <a href="${baseUrl}/api/download/${file.id}">Download</a>`;
+        if (streamable || audioFile) {
+          msg += `\n▶️ <a href="${baseUrl}/api/stream-page/${file.id}">Stream Online</a>`;
+        }
+        await ctx.replyWithHTML(msg);
         return;
       }
     } catch (err) {
@@ -53,7 +51,11 @@ bot.start(async (ctx) => {
   }
 
   await ctx.replyWithHTML(
-    `<b>🌐 Welcome to File2Link BOT</b>\n\nForward any file to me and I’ll return stylish download and stream links.`,
+    `🌐 <b>Welcome to File2Link BOT</b>\n\n` +
+    `Forward any file to me and I'll generate:\n` +
+    `⬇️ A direct <b>download link</b>\n` +
+    `▶️ A <b>stream link</b> for videos and audio\n\n` +
+    `📤 <i>Just forward or send any file to get started!</i>`,
   );
 });
 
@@ -182,13 +184,37 @@ bot.on("message", async (ctx) => {
     const baseUrl = getBaseUrl();
     const downloadUrl = `${baseUrl}/api/download/${recordId}`;
     const streamPageUrl = `${baseUrl}/api/stream-page/${recordId}`;
-    const text = [`<b>💖 File2Link BOT</b>`, ``, `<b>📁 ${fileName || "File"}</b>`, mimeType ? `Type: <code>${mimeType}</code>` : null, fileSize ? `Size: ${formatSize(fileSize)}` : null].filter(Boolean).join("\n");
 
-    await ctx.replyWithHTML(text, replyMarkup(downloadUrl, streamable || audioFile ? streamPageUrl : undefined));
+    // Build contextual emoji based on file type
+    const typeEmoji = fileType === "video" || fileType === "animation" || fileType === "video_note"
+      ? "🎬"
+      : fileType === "audio" || fileType === "voice"
+      ? "🎵"
+      : fileType === "photo"
+      ? "🖼"
+      : fileType === "sticker"
+      ? "🎭"
+      : "📄";
 
-    await logToChannel(
-      `<b>📥 New File Received</b>\nUser: ${fromUsername ? `@${fromUsername}` : "Unknown"} (${fromUserId})\nFile: ${fileName || "Untitled"}\nType: ${mimeType || fileType}\nSize: ${fileSize ? formatSize(fileSize) : "Unknown"}\nID: <code>${recordId}</code>`,
-    );
+    let replyText = `✅ <b>File saved successfully!</b>\n\n`;
+    replyText += `${typeEmoji} <b>${fileName || "File"}</b>\n`;
+    if (mimeType) replyText += `🗂 Type: <code>${mimeType}</code>\n`;
+    if (fileSize) replyText += `📦 Size: ${formatSize(fileSize)}\n`;
+    if (duration) replyText += `⏱ Duration: ${formatDuration(duration)}\n`;
+    replyText += `\n⬇️ <a href="${downloadUrl}">Download</a>`;
+    if (streamable || audioFile) {
+      replyText += `\n▶️ <a href="${streamPageUrl}">Stream Online</a>`;
+    }
+
+    await ctx.replyWithHTML(replyText, { reply_parameters: { message_id: messageId } });
+
+    const logMsg = `📥 <b>New File Received</b>\n` +
+      `👤 User: ${fromUsername ? `@${fromUsername}` : "Unknown"} (${fromUserId})\n` +
+      `${typeEmoji} File: ${fileName || "Untitled"}\n` +
+      `🗂 Type: ${mimeType || fileType}\n` +
+      `📦 Size: ${fileSize ? formatSize(fileSize) : "Unknown"}\n` +
+      `🆔 ID: <code>${recordId}</code>`;
+    await logToChannel(logMsg);
   } catch (err) {
     logger.error({ err }, "Error processing file message");
     await ctx.reply("❌ An error occurred while processing your file. Please try again.");
@@ -200,6 +226,14 @@ function formatSize(bytes: number): string {
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   if (bytes < 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
   return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GB`;
+}
+
+function formatDuration(secs: number): string {
+  const h = Math.floor(secs / 3600);
+  const m = Math.floor((secs % 3600) / 60);
+  const s = secs % 60;
+  if (h > 0) return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+  return `${m}:${String(s).padStart(2, "0")}`;
 }
 
 export async function startBot(): Promise<void> {

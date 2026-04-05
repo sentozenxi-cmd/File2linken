@@ -158,7 +158,7 @@ router.get("/", (req, res) => {
       <div class="section"><h3>🎬 Media Ready</h3><p>Video, audio, images, and documents get the right browser experience automatically.</p></div>
     </div>
   </div>
-  <footer>File2Link BOT · gradient neon experience</footer>
+  <footer>File2Link BOT · Fast Telegram CDN Streaming</footer>
 </body>
 </html>`;
 
