@@ -1,6 +1,5 @@
-import { Telegraf } from "telegraf";
-import { db } from "@workspace/db";
-import { filesTable } from "@workspace/db";
+import { Telegraf, Markup } from "telegraf";
+import { db, filesTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { isStreamable, isAudio, generateFileId } from "../lib/fileUtils.js";
 import { logger } from "../lib/logger.js";
@@ -24,6 +23,12 @@ async function logToChannel(message: string): Promise<void> {
   }
 }
 
+function replyMarkup(downloadUrl: string, streamUrl?: string) {
+  const buttons = [[Markup.button.url("⬇️ Download", downloadUrl)]];
+  if (streamUrl) buttons.push([Markup.button.url("❤️ Stream", streamUrl)]);
+  return Markup.inlineKeyboard(buttons);
+}
+
 bot.start(async (ctx) => {
   const startParam = ctx.startPayload;
   if (startParam) {
@@ -31,22 +36,15 @@ bot.start(async (ctx) => {
       const rows = await db.select().from(filesTable).where(eq(filesTable.id, startParam)).limit(1);
       if (rows.length > 0) {
         const file = rows[0]!;
-        await db.update(filesTable)
-          .set({ accessCount: (file.accessCount || 0) + 1 })
-          .where(eq(filesTable.id, startParam));
-
+        await db.update(filesTable).set({ accessCount: (file.accessCount || 0) + 1 }).where(eq(filesTable.id, startParam));
         const baseUrl = getBaseUrl();
-        const streamable = file.isStreamable;
-        const audioFile = file.isAudio;
+        const streamable = file.isStreamable || isStreamable(file.mimeType);
+        const audioFile = file.isAudio || isAudio(file.mimeType);
         const fileLabel = file.fileName || "File";
         let msg = `<b>📁 ${fileLabel}</b>\n\n`;
         if (file.mimeType) msg += `Type: <code>${file.mimeType}</code>\n`;
         if (file.fileSize) msg += `Size: ${formatSize(file.fileSize)}\n`;
-        msg += `\n<a href="${baseUrl}/api/download/${file.id}">⬇️ Download File</a>`;
-        if (streamable || audioFile) {
-          msg += `\n<a href="${baseUrl}/api/stream-page/${file.id}">▶️ Stream / Play Online</a>`;
-        }
-        await ctx.replyWithHTML(msg);
+        await ctx.replyWithHTML(msg, replyMarkup(`${baseUrl}/api/download/${file.id}`, streamable || audioFile ? `${baseUrl}/api/stream-page/${file.id}` : undefined));
         return;
       }
     } catch (err) {
@@ -55,11 +53,7 @@ bot.start(async (ctx) => {
   }
 
   await ctx.replyWithHTML(
-    `<b>🌐 Welcome to File2Link BOT</b>\n\n` +
-    `Forward any file to me and I'll generate:\n` +
-    `• A direct <b>download link</b>\n` +
-    `• A <b>stream link</b> for videos and audio\n\n` +
-    `<i>Just forward or send any file to get started!</i>`
+    `<b>🌐 Welcome to File2Link BOT</b>\n\nForward any file to me and I’ll return stylish download and stream links.`,
   );
 });
 
@@ -152,21 +146,16 @@ bot.on("message", async (ctx) => {
   const fromUserId = msg.from?.id || null;
   const fromUsername = msg.from?.username || msg.from?.first_name || null;
   const caption = msg.caption || null;
-
   const streamable = isStreamable(mimeType);
   const audioFile = isAudio(mimeType);
 
   try {
-    const existing = await db.select().from(filesTable)
-      .where(eq(filesTable.fileUniqueId, fileUniqueId)).limit(1);
-
+    const existing = await db.select().from(filesTable).where(eq(filesTable.fileUniqueId, fileUniqueId)).limit(1);
     let recordId: string;
 
     if (existing.length > 0) {
       recordId = existing[0]!.id;
-      await db.update(filesTable)
-        .set({ fileId, chatId, messageId })
-        .where(eq(filesTable.id, recordId));
+      await db.update(filesTable).set({ fileId, chatId, messageId }).where(eq(filesTable.id, recordId));
     } else {
       recordId = generateFileId();
       await db.insert(filesTable).values({
@@ -193,28 +182,13 @@ bot.on("message", async (ctx) => {
     const baseUrl = getBaseUrl();
     const downloadUrl = `${baseUrl}/api/download/${recordId}`;
     const streamPageUrl = `${baseUrl}/api/stream-page/${recordId}`;
+    const text = [`<b>💖 File2Link BOT</b>`, ``, `<b>📁 ${fileName || "File"}</b>`, mimeType ? `Type: <code>${mimeType}</code>` : null, fileSize ? `Size: ${formatSize(fileSize)}` : null].filter(Boolean).join("\n");
 
-    let replyText = `<b>✅ File2Link BOT</b>\n\n`;
-    replyText += `<b>📁 ${fileName || "File"}</b>\n`;
-    if (mimeType) replyText += `Type: <code>${mimeType}</code>\n`;
-    if (fileSize) replyText += `Size: ${formatSize(fileSize)}\n`;
-    replyText += `\n`;
-    replyText += `<a href="${downloadUrl}">⬇️ Download Link</a>`;
-    if (streamable || audioFile) {
-      replyText += `\n<a href="${streamPageUrl}">▶️ Stream / Play Online</a>`;
-    }
+    await ctx.replyWithHTML(text, replyMarkup(downloadUrl, streamable || audioFile ? streamPageUrl : undefined));
 
-    await ctx.replyWithHTML(replyText, { reply_parameters: { message_id: messageId } });
-
-    const logMsg = `<b>📥 New File Received</b>\n` +
-      `User: ${fromUsername ? `@${fromUsername}` : "Unknown"} (${fromUserId})\n` +
-      `File: ${fileName || "Untitled"}\n` +
-      `Type: ${mimeType || fileType}\n` +
-      `Size: ${fileSize ? formatSize(fileSize) : "Unknown"}\n` +
-      `ID: <code>${recordId}</code>\n` +
-      `Download: <a href="${downloadUrl}">Link</a>`;
-    await logToChannel(logMsg);
-
+    await logToChannel(
+      `<b>📥 New File Received</b>\nUser: ${fromUsername ? `@${fromUsername}` : "Unknown"} (${fromUserId})\nFile: ${fileName || "Untitled"}\nType: ${mimeType || fileType}\nSize: ${fileSize ? formatSize(fileSize) : "Unknown"}\nID: <code>${recordId}</code>`,
+    );
   } catch (err) {
     logger.error({ err }, "Error processing file message");
     await ctx.reply("❌ An error occurred while processing your file. Please try again.");

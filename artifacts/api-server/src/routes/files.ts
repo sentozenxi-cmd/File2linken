@@ -15,10 +15,7 @@ router.get("/download/:id", async (req, res) => {
       return;
     }
     const file = rows[0]!;
-    await db.update(filesTable)
-      .set({ accessCount: (file.accessCount || 0) + 1 })
-      .where(eq(filesTable.id, file.id));
-
+    await db.update(filesTable).set({ accessCount: (file.accessCount || 0) + 1 }).where(eq(filesTable.id, file.id));
     await streamTelegramFile(req, res, file.fileId, file.mimeType, file.fileName, file.fileSize, true);
   } catch (err) {
     req.log.error({ err }, "Download error");
@@ -34,6 +31,7 @@ router.get("/stream/:id", async (req, res) => {
       return;
     }
     const file = rows[0]!;
+    await db.update(filesTable).set({ accessCount: (file.accessCount || 0) + 1 }).where(eq(filesTable.id, file.id));
     await streamTelegramFile(req, res, file.fileId, file.mimeType, file.fileName, file.fileSize, false);
   } catch (err) {
     req.log.error({ err }, "Stream error");
@@ -49,7 +47,6 @@ router.get("/stream-page/:id", async (req, res) => {
       return;
     }
     const file = rows[0]!;
-    const baseUrl = req.protocol + "://" + req.get("host");
     const streamUrl = `/api/stream/${file.id}`;
     const downloadUrl = `/api/download/${file.id}`;
     const fileLabel = file.fileName || "Untitled File";
@@ -98,288 +95,137 @@ router.get("/stream-page/:id", async (req, res) => {
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>${fileLabel} — File2Link BOT</title>
   <style>
-    @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Rajdhani:wght@400;600;700&display=swap');
-
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Manrope:wght@400;500;700;800&display=swap');
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
     :root {
-      --neon: #00ff41;
-      --neon-dim: #00cc33;
-      --neon-glow: rgba(0, 255, 65, 0.5);
-      --neon-faint: rgba(0, 255, 65, 0.07);
-      --bg: #010a01;
-      --surface: #0a140a;
-      --border: #003310;
-      --text: #c8ffd4;
-      --text-dim: #5a8a62;
+      --neon: #00ff6a;
+      --neon-2: #b7ff00;
+      --glow: rgba(0, 255, 106, 0.35);
+      --bg: #030403;
+      --panel: rgba(8, 16, 10, 0.9);
+      --border: rgba(0, 255, 106, 0.18);
+      --text: #effff3;
+      --muted: #9ac8a4;
     }
-
     body {
-      background: var(--bg);
-      color: var(--text);
-      font-family: 'Rajdhani', sans-serif;
       min-height: 100vh;
+      color: var(--text);
+      font-family: 'Inter', sans-serif;
+      background:
+        radial-gradient(circle at top, rgba(0,255,106,.2), transparent 34%),
+        radial-gradient(circle at bottom right, rgba(183,255,0,.08), transparent 24%),
+        linear-gradient(135deg, #010201 0%, #07100a 42%, #020202 100%);
       display: flex;
       flex-direction: column;
       align-items: center;
       padding: 0 16px 40px;
     }
-
-    /* Scan line overlay */
     body::before {
       content: '';
       position: fixed;
       inset: 0;
-      background: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,255,65,0.015) 2px, rgba(0,255,65,0.015) 4px);
+      background:
+        linear-gradient(120deg, rgba(0,255,106,0.05), transparent 36%),
+        repeating-linear-gradient(180deg, transparent 0 4px, rgba(255,255,255,0.015) 4px 8px);
       pointer-events: none;
-      z-index: 999;
     }
-
+    header, .card, footer { position: relative; z-index: 1; }
     header {
-      width: 100%;
-      max-width: 860px;
-      padding: 24px 0 16px;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      border-bottom: 1px solid var(--border);
-      margin-bottom: 32px;
+      width: 100%; max-width: 940px; padding: 24px 0 18px;
+      display: flex; justify-content: space-between; align-items: center;
+      border-bottom: 1px solid var(--border); margin-bottom: 26px;
     }
-
     .logo {
-      font-family: 'Share Tech Mono', monospace;
-      font-size: 1.3rem;
-      color: var(--neon);
-      text-shadow: 0 0 10px var(--neon-glow);
-      letter-spacing: 2px;
-      text-decoration: none;
+      font-family: 'Manrope', sans-serif; font-weight: 800; font-size: 1.2rem;
+      letter-spacing: 1.6px; color: #fff; text-decoration: none;
+      text-shadow: 0 0 18px var(--glow);
     }
-
-    .logo span { color: #fff; }
-
-    .header-tag {
-      font-family: 'Share Tech Mono', monospace;
-      font-size: 0.7rem;
-      color: var(--neon-dim);
-      border: 1px solid var(--border);
-      padding: 4px 10px;
-      letter-spacing: 1px;
+    .logo span { color: var(--neon); }
+    .chip {
+      font-size: .72rem; letter-spacing: 2px; color: var(--neon);
+      border: 1px solid var(--border); padding: 6px 10px; border-radius: 999px;
+      background: rgba(0,255,106,.06);
     }
-
     .card {
-      width: 100%;
-      max-width: 860px;
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-top: 2px solid var(--neon-dim);
-      padding: 28px;
-      position: relative;
+      width: 100%; max-width: 940px; padding: 30px;
+      background: linear-gradient(180deg, rgba(8,16,10,.95), rgba(3,5,4,.92));
+      border: 1px solid rgba(0,255,106,.16);
+      border-radius: 28px;
+      box-shadow: 0 0 0 1px rgba(255,255,255,.02), 0 24px 80px rgba(0,0,0,.55), 0 0 50px rgba(0,255,106,.12);
+      backdrop-filter: blur(18px);
     }
-
-    .card::before {
-      content: '';
-      position: absolute;
-      inset: 0;
-      background: radial-gradient(ellipse at top, rgba(0,255,65,0.04) 0%, transparent 70%);
-      pointer-events: none;
-    }
-
-    .file-meta {
-      margin-bottom: 24px;
-    }
-
+    .meta { margin-bottom: 24px; }
     .file-name {
-      font-size: 1.5rem;
-      font-weight: 700;
-      color: #fff;
-      word-break: break-all;
-      line-height: 1.3;
-      margin-bottom: 10px;
+      font-family: 'Manrope', sans-serif; font-size: 1.55rem; font-weight: 800;
+      color: #fff; line-height: 1.2; word-break: break-word; margin-bottom: 12px;
     }
-
-    .file-tags {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px;
-    }
-
+    .tags { display: flex; flex-wrap: wrap; gap: 10px; }
     .tag {
-      font-family: 'Share Tech Mono', monospace;
-      font-size: 0.72rem;
-      padding: 3px 10px;
-      border: 1px solid var(--border);
-      color: var(--neon-dim);
-      letter-spacing: 1px;
+      font-size: .76rem; letter-spacing: 1px; color: var(--muted);
+      border: 1px solid rgba(0,255,106,.18); background: rgba(0,0,0,.28);
+      padding: 6px 10px; border-radius: 999px;
     }
-
-    .tag.highlight {
-      border-color: var(--neon-dim);
-      color: var(--neon);
-      background: rgba(0,255,65,0.05);
-    }
-
-    .media-container {
-      width: 100%;
-      margin: 20px 0;
-      background: #000;
-      border: 1px solid var(--border);
-      position: relative;
-    }
-
-    .media-container video,
-    .media-container audio {
-      width: 100%;
-      display: block;
-      outline: none;
-    }
-
-    .audio-container {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      padding: 32px 24px;
-      gap: 20px;
-      background: #000;
-    }
-
-    .audio-icon {
-      font-size: 4rem;
-      filter: drop-shadow(0 0 12px var(--neon-glow));
-    }
-
-    .audio-container audio {
-      width: 100%;
-    }
-
-    .image-container {
-      display: flex;
-      justify-content: center;
-      padding: 12px;
-    }
-
-    .image-container img {
-      max-width: 100%;
-      max-height: 600px;
-      object-fit: contain;
-    }
-
-    .no-preview {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      padding: 48px 24px;
-      gap: 12px;
-      color: var(--text-dim);
-      text-align: center;
-    }
-
-    .no-preview-icon { font-size: 3.5rem; }
-
-    .actions {
-      display: flex;
-      gap: 12px;
-      flex-wrap: wrap;
-      margin-top: 20px;
-    }
-
+    .tag.hot { color: #000; background: linear-gradient(135deg, var(--neon), var(--neon-2)); border-color: transparent; }
+    .media-container { margin: 22px 0; border-radius: 22px; overflow: hidden; border: 1px solid rgba(0,255,106,.14); background: #000; }
+    video, audio, img { width: 100%; display: block; }
+    .audio-container { padding: 28px; display: grid; place-items: center; gap: 18px; background: linear-gradient(180deg, rgba(2,8,3,.95), rgba(0,0,0,.95)); }
+    .audio-icon { font-size: 3.6rem; filter: drop-shadow(0 0 18px var(--glow)); }
+    .image-container { padding: 10px; }
+    .image-container img { max-height: 700px; object-fit: contain; }
+    .no-preview { padding: 54px 20px; text-align: center; color: var(--muted); }
+    .actions { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 20px; }
     .btn {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      padding: 12px 24px;
-      font-family: 'Share Tech Mono', monospace;
-      font-size: 0.9rem;
-      letter-spacing: 1px;
-      text-decoration: none;
-      cursor: pointer;
-      border: none;
-      transition: all 0.15s;
+      display: inline-flex; align-items: center; justify-content: center; gap: 10px;
+      padding: 14px 22px; border-radius: 16px; text-decoration: none;
+      font-family: 'Manrope', sans-serif; font-weight: 800; letter-spacing: .8px;
+      border: 1px solid transparent; transition: transform .15s ease, box-shadow .15s ease, background .15s ease;
     }
-
+    .btn:hover { transform: translateY(-1px); }
     .btn-primary {
-      background: var(--neon);
-      color: #000;
-      font-weight: bold;
+      color: #001406;
+      background: linear-gradient(135deg, var(--neon), var(--neon-2));
+      box-shadow: 0 0 0 1px rgba(255,255,255,.05), 0 0 26px rgba(0,255,106,.22);
     }
-
-    .btn-primary:hover {
-      background: #fff;
-      box-shadow: 0 0 20px var(--neon-glow);
+    .btn-primary:hover { box-shadow: 0 0 34px rgba(0,255,106,.34); }
+    .btn-ghost {
+      color: #dfffe6; background: rgba(255,255,255,.04); border-color: rgba(0,255,106,.16);
     }
-
-    .btn-outline {
-      background: transparent;
-      border: 1px solid var(--neon-dim);
-      color: var(--neon);
-    }
-
-    .btn-outline:hover {
-      background: var(--neon-faint);
-      box-shadow: 0 0 14px var(--neon-glow);
-    }
-
-    footer {
-      margin-top: 40px;
-      font-family: 'Share Tech Mono', monospace;
-      font-size: 0.7rem;
-      color: var(--text-dim);
-      letter-spacing: 1px;
-      text-align: center;
-    }
-
-    footer a { color: var(--neon-dim); text-decoration: none; }
-    footer a:hover { color: var(--neon); }
-
-    /* Custom video controls glow */
-    video::-webkit-media-controls-panel { background: #001a00; }
-
-    @media (max-width: 600px) {
-      .file-name { font-size: 1.15rem; }
+    footer { margin-top: 28px; color: var(--muted); font-size: .76rem; letter-spacing: 1.2px; }
+    @media (max-width: 640px) {
+      .card { padding: 20px; border-radius: 22px; }
+      .file-name { font-size: 1.18rem; }
       .actions { flex-direction: column; }
-      .btn { justify-content: center; }
+      .btn { width: 100%; }
     }
   </style>
 </head>
 <body>
   <header>
-    <a class="logo" href="#">File2Link<span>BOT</span></a>
-    <div class="header-tag">[ STREAM PORTAL ]</div>
+    <a class="logo" href="/">File2Link<span>BOT</span></a>
+    <div class="chip">PREMIUM PLAYER</div>
   </header>
-
   <div class="card">
-    <div class="file-meta">
+    <div class="meta">
       <div class="file-name">${escHtml(fileLabel)}</div>
-      <div class="file-tags">
-        <span class="tag highlight">${escHtml(typeLabel)}</span>
+      <div class="tags">
+        <span class="tag hot">${escHtml(typeLabel)}</span>
         ${file.mimeType ? `<span class="tag">${escHtml(file.mimeType)}</span>` : ""}
         ${file.fileSize ? `<span class="tag">${escHtml(sizeLabel)}</span>` : ""}
         ${file.duration ? `<span class="tag">${formatDuration(file.duration)}</span>` : ""}
         ${(file.width && file.height) ? `<span class="tag">${file.width}×${file.height}</span>` : ""}
       </div>
     </div>
-
     ${mediaPlayer}
-
     <div class="actions">
-      <a class="btn btn-primary" href="${downloadUrl}" download="${escHtml(fileLabel)}">
-        ⬇ DOWNLOAD FILE
-      </a>
-      ${(isVideo || isAudio || isImage) ? `
-      <a class="btn btn-outline" href="${streamUrl}" target="_blank">
-        ▶ DIRECT LINK
-      </a>` : ""}
+      <a class="btn btn-primary" href="${downloadUrl}" download="${escHtml(fileLabel)}">⬇ Download</a>
     </div>
   </div>
-
-  <footer>
-    <p>Powered by <a href="#">File2Link BOT</a> &nbsp;|&nbsp; Fast CDN streaming</p>
-  </footer>
+  <footer>File2Link BOT · neon delivery</footer>
 </body>
 </html>`;
 
     res.setHeader("Content-Type", "text/html; charset=utf-8");
-    res.setHeader("Cache-Control", "public, max-age=60");
+    res.setHeader("Cache-Control", "no-store");
     res.send(html);
   } catch (err) {
     req.log.error({ err }, "Stream page error");
