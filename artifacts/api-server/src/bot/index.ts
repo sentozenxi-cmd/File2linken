@@ -4,7 +4,7 @@ import { eq } from "drizzle-orm";
 import { isStreamable, isAudio, generateFileId } from "../lib/fileUtils.js";
 import { logger } from "../lib/logger.js";
 
-const BOT_TOKEN = process.env.BOT_TOKEN!;
+const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN!;
 const LOG_CHANNEL_ID = process.env.LOG_CHANNEL_ID!;
 
 export const bot = new Telegraf(BOT_TOKEN);

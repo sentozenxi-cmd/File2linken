@@ -6,9 +6,9 @@ import * as fs from "fs";
 import * as path from "path";
 import { logger } from "./logger.js";
 
-const API_ID = parseInt(process.env.API_ID!, 10);
-const API_HASH = process.env.API_HASH!;
-const BOT_TOKEN = process.env.BOT_TOKEN!;
+const API_ID = parseInt(process.env.TELEGRAM_API_ID!, 10);
+const API_HASH = process.env.TELEGRAM_API_HASH!;
+const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN!;
 const SESSION_FILE = path.resolve("telegram_session.txt");
 
 // Request size must be a multiple of 4096 for MTProto
