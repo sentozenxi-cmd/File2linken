@@ -194,7 +194,7 @@ router.get("/stream-page/:id", async (req, res) => {
 </head>
 <body>
   <header>
-    <a class="logo" href="/">File2Link<span>BOT</span></a>
+    <div class="logo">File2Link<span>BOT</span></div>
   </header>
   <div class="card">
     <div class="meta">
@@ -210,7 +210,6 @@ router.get("/stream-page/:id", async (req, res) => {
     ${mediaPlayer}
     <div class="actions">
       <a class="btn btn-primary" href="${downloadUrl}" download="${escHtml(fileLabel)}">⬇️ Download</a>
-      ${(isVideo || isAudio) ? `<a class="btn btn-primary" href="${streamUrl}" target="_blank" style="background:linear-gradient(135deg,#00bfff,#0070c0);color:#fff;">▶️ Direct Stream</a>` : ""}
     </div>
   </div>
 </body>

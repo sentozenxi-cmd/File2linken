@@ -19,7 +19,10 @@ export async function streamTelegramFile(
     if (rangeHeader && fileSize) {
       const parts = rangeHeader.replace(/bytes=/, "").split("-");
       const start = parseInt(parts[0] ?? "0", 10);
-      const end = parts[1] ? parseInt(parts[1], 10) : Math.min(start + 1024 * 1024 - 1, fileSize - 1);
+      // Cap chunk size at 4MB for range requests (improves seek responsiveness)
+      const end = parts[1]
+        ? parseInt(parts[1], 10)
+        : Math.min(start + 4 * 1024 * 1024 - 1, fileSize - 1);
       const chunkSize = end - start + 1;
 
       res.status(206);
@@ -28,14 +31,18 @@ export async function streamTelegramFile(
       res.setHeader("Content-Length", String(chunkSize));
       res.setHeader("Content-Type", contentType);
       if (isDownload) {
-        res.setHeader("Content-Disposition", `attachment; filename="${sanitizeFileName(fileName || "file")}"`);
+        res.setHeader(
+          "Content-Disposition",
+          `attachment; filename="${sanitizeFileName(fileName || "file")}"`,
+        );
       }
 
       await streamFileByMessage(
         chatId,
         messageId,
         (chunk) => {
-          res.write(chunk);
+          const ok = res.write(chunk);
+          return ok; // false = backpressure, but we still continue for simplicity
         },
         start,
         chunkSize,
@@ -44,20 +51,31 @@ export async function streamTelegramFile(
       return;
     }
 
-    // Full file stream
+    // Full-file stream
     res.setHeader("Accept-Ranges", "bytes");
     res.setHeader("Content-Type", contentType);
     if (fileSize) res.setHeader("Content-Length", String(fileSize));
     if (isDownload) {
-      res.setHeader("Content-Disposition", `attachment; filename="${sanitizeFileName(fileName || "file")}"`);
+      res.setHeader(
+        "Content-Disposition",
+        `attachment; filename="${sanitizeFileName(fileName || "file")}"`,
+      );
     } else {
       res.setHeader("Content-Disposition", "inline");
     }
 
-    await streamFileByMessage(chatId, messageId, (chunk) => {
-      res.write(chunk);
+    let aborted = false;
+    req.on("close", () => {
+      aborted = true;
     });
-    res.end();
+
+    await streamFileByMessage(chatId, messageId, (chunk) => {
+      if (aborted) return false;
+      res.write(chunk);
+      return true;
+    });
+
+    if (!aborted) res.end();
   } catch (err) {
     logger.error({ err }, "Error streaming Telegram file via MTProto");
     if (!res.headersSent) {
