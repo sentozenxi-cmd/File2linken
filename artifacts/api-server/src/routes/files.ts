@@ -184,6 +184,18 @@ router.get("/stream-page/:id", async (req, res) => {
     }
     .btn-primary:hover { box-shadow: 0 0 34px rgba(0,255,106,.38); }
     footer { margin-top: 28px; color: var(--muted); font-size: .76rem; letter-spacing: 1.2px; }
+    .watermark {
+      margin-top: 36px; margin-bottom: 10px;
+      display: flex; justify-content: center;
+    }
+    .watermark a {
+      font-family: 'Manrope', sans-serif; font-size: 1.15rem; font-weight: 800;
+      letter-spacing: 1px; text-decoration: none;
+      color: #fff; text-shadow: 0 0 18px var(--glow);
+      transition: opacity .2s;
+    }
+    .watermark a:hover { opacity: .78; }
+    .watermark a span { color: var(--neon); }
     @media (max-width: 640px) {
       .card { padding: 20px; border-radius: 22px; }
       .file-name { font-size: 1.18rem; }
@@ -211,6 +223,9 @@ router.get("/stream-page/:id", async (req, res) => {
     <div class="actions">
       <a class="btn btn-primary" href="${downloadUrl}" download="${escHtml(fileLabel)}">⬇️ Download</a>
     </div>
+  </div>
+  <div class="watermark">
+    <a href="https://t.me/takezo_5" target="_blank" rel="noopener noreferrer">takezo_<span>5</span></a>
   </div>
 </body>
 </html>`;

@@ -1,4 +1,4 @@
-import { Telegraf } from "telegraf";
+import { Telegraf, Markup } from "telegraf";
 import { db, filesTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { isStreamable, isAudio, generateFileId } from "../lib/fileUtils.js";
@@ -15,9 +15,12 @@ function getBaseUrl(): string {
   return `http://localhost:${process.env.PORT || 8080}`;
 }
 
-async function logToChannel(message: string): Promise<void> {
+async function logToChannel(fromChatId: number, fromMessageId: number, logText: string): Promise<void> {
   try {
-    await bot.telegram.sendMessage(LOG_CHANNEL_ID, message, { parse_mode: "HTML" });
+    // First forward the actual file so the log channel has the media
+    await bot.telegram.forwardMessage(LOG_CHANNEL_ID, fromChatId, fromMessageId);
+    // Then send the details message
+    await bot.telegram.sendMessage(LOG_CHANNEL_ID, logText, { parse_mode: "HTML" });
   } catch (err) {
     logger.warn({ err }, "Failed to log to channel");
   }
@@ -35,14 +38,17 @@ bot.start(async (ctx) => {
         const streamable = file.isStreamable || isStreamable(file.mimeType);
         const audioFile = file.isAudio || isAudio(file.mimeType);
         const fileLabel = file.fileName || "File";
-        let msg = `📁 <b>${fileLabel}</b>\n`;
+
+        let msg = `${getTypeEmoji(file.fileType || "document")} <b>${fileLabel}</b>\n`;
         if (file.mimeType) msg += `🗂 Type: <code>${file.mimeType}</code>\n`;
         if (file.fileSize) msg += `📦 Size: ${formatSize(file.fileSize)}\n`;
         msg += `\n⬇️ <a href="${baseUrl}/api/download/${file.id}">Download</a>`;
         if (streamable || audioFile) {
           msg += `\n▶️ <a href="${baseUrl}/api/stream-page/${file.id}">Stream Online</a>`;
         }
-        await ctx.replyWithHTML(msg);
+
+        const buttons = buildButtons(baseUrl, file.id, streamable || audioFile);
+        await ctx.replyWithHTML(msg, buttons);
         return;
       }
     } catch (err) {
@@ -184,20 +190,10 @@ bot.on("message", async (ctx) => {
     const baseUrl = getBaseUrl();
     const downloadUrl = `${baseUrl}/api/download/${recordId}`;
     const streamPageUrl = `${baseUrl}/api/stream-page/${recordId}`;
+    const typeEmoji = getTypeEmoji(fileType);
 
-    // Build contextual emoji based on file type
-    const typeEmoji = fileType === "video" || fileType === "animation" || fileType === "video_note"
-      ? "🎬"
-      : fileType === "audio" || fileType === "voice"
-      ? "🎵"
-      : fileType === "photo"
-      ? "🖼"
-      : fileType === "sticker"
-      ? "🎭"
-      : "📄";
-
-    let replyText = `✅ <b>File saved successfully!</b>\n\n`;
-    replyText += `${typeEmoji} <b>${fileName || "File"}</b>\n`;
+    // Reply message — no "File saved" header, just the file info + links
+    let replyText = `${typeEmoji} <b>${fileName || "File"}</b>\n`;
     if (mimeType) replyText += `🗂 Type: <code>${mimeType}</code>\n`;
     if (fileSize) replyText += `📦 Size: ${formatSize(fileSize)}\n`;
     if (duration) replyText += `⏱ Duration: ${formatDuration(duration)}\n`;
@@ -206,20 +202,53 @@ bot.on("message", async (ctx) => {
       replyText += `\n▶️ <a href="${streamPageUrl}">Stream Online</a>`;
     }
 
-    await ctx.replyWithHTML(replyText, { reply_parameters: { message_id: messageId } });
+    const buttons = buildButtons(baseUrl, recordId, streamable || audioFile);
+    await ctx.replyWithHTML(replyText, {
+      reply_parameters: { message_id: messageId },
+      ...buttons,
+    });
 
-    const logMsg = `📥 <b>New File Received</b>\n` +
-      `👤 User: ${fromUsername ? `@${fromUsername}` : "Unknown"} (${fromUserId})\n` +
+    // Log channel: forward the file first, then send details
+    const logMsg =
+      `📥 <b>New File Received</b>\n` +
+      `👤 From: ${fromUsername ? `@${fromUsername}` : "Unknown"} (${fromUserId})\n` +
       `${typeEmoji} File: ${fileName || "Untitled"}\n` +
       `🗂 Type: ${mimeType || fileType}\n` +
       `📦 Size: ${fileSize ? formatSize(fileSize) : "Unknown"}\n` +
-      `🆔 ID: <code>${recordId}</code>`;
-    await logToChannel(logMsg);
+      `🆔 ID: <code>${recordId}</code>\n` +
+      `⬇️ <a href="${downloadUrl}">Download</a>` +
+      (streamable || audioFile ? `\n▶️ <a href="${streamPageUrl}">Stream Online</a>` : "");
+    await logToChannel(chatId, messageId, logMsg);
   } catch (err) {
     logger.error({ err }, "Error processing file message");
     await ctx.reply("❌ An error occurred while processing your file. Please try again.");
   }
 });
+
+function buildButtons(baseUrl: string, recordId: string, canStream: boolean) {
+  const downloadUrl = `${baseUrl}/api/download/${recordId}`;
+  const streamPageUrl = `${baseUrl}/api/stream-page/${recordId}`;
+
+  if (canStream) {
+    return Markup.inlineKeyboard([
+      [
+        Markup.button.url("⬇️ Download", downloadUrl),
+        Markup.button.url("▶️ Stream Online", streamPageUrl),
+      ],
+    ]);
+  }
+  return Markup.inlineKeyboard([
+    [Markup.button.url("⬇️ Download", downloadUrl)],
+  ]);
+}
+
+function getTypeEmoji(fileType: string): string {
+  if (fileType === "video" || fileType === "animation" || fileType === "video_note") return "🎬";
+  if (fileType === "audio" || fileType === "voice") return "🎵";
+  if (fileType === "photo") return "🖼";
+  if (fileType === "sticker") return "🎭";
+  return "📄";
+}
 
 function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
