@@ -107,36 +107,71 @@ router.get("/stream-page/:id", async (req, res) => {
             var msg    = document.getElementById('load-msg');
             var banner = document.getElementById('enjoy-banner');
             var played = false;
+            var current = 0;
+            var animFrame;
 
-            function updateBuffer(){
+            // Ease-out curve: moves fast at first, slows near the cap
+            // cap keeps rising every second so the bar never fully stops
+            var cap = 5;
+            var capTimer = setInterval(function(){
+              cap = Math.min(88, cap + (cap < 30 ? 4 : cap < 60 ? 2 : 0.5));
+            }, 1000);
+
+            function animate(){
+              if(played) return;
+              // Creep toward cap
+              current += (cap - current) * 0.04;
+              current = Math.min(current, cap);
+              fill.style.width = current.toFixed(1) + '%';
+              var rounded = Math.floor(current);
+              if(rounded < 30)      msg.textContent = 'Downloading… ' + rounded + '%';
+              else if(rounded < 70) msg.textContent = 'Processing video… ' + rounded + '%';
+              else                  msg.textContent = 'Almost ready… ' + rounded + '%';
+              animFrame = requestAnimationFrame(animate);
+            }
+            animFrame = requestAnimationFrame(animate);
+
+            // If real buffered data arrives, use it (takes over from fake animation)
+            v.addEventListener('progress', function(){
               if(played || !v.duration) return;
               try {
-                var buf = v.buffered.length ? v.buffered.end(v.buffered.length-1) : 0;
-                var pct = Math.min(100, Math.round((buf / v.duration) * 100));
-                fill.style.width = pct + '%';
-                msg.textContent = 'Loading… ' + pct + '%';
+                var buf = v.buffered.length ? v.buffered.end(v.buffered.length - 1) : 0;
+                var real = Math.min(88, Math.round((buf / v.duration) * 100));
+                if(real > current) { current = real; cap = Math.max(cap, real); }
               } catch(e){}
-            }
+            });
 
-            v.addEventListener('progress', updateBuffer);
-            v.addEventListener('waiting', function(){ msg.textContent = 'Buffering…'; });
-
-            v.addEventListener('playing', function(){
+            function finish(){
               if(played) return;
               played = true;
+              clearInterval(capTimer);
+              cancelAnimationFrame(animFrame);
+              fill.style.transition = 'width .3s ease';
               fill.style.width = '100%';
-              status.style.display = 'none';
-              banner.style.display = 'flex';
+              msg.textContent = 'Ready!';
               setTimeout(function(){
-                banner.style.opacity = '0';
-                setTimeout(function(){ banner.style.display = 'none'; }, 600);
-              }, 2000);
+                status.style.display = 'none';
+                banner.style.display = 'flex';
+                setTimeout(function(){
+                  banner.style.opacity = '0';
+                  setTimeout(function(){ banner.style.display = 'none'; }, 600);
+                }, 2000);
+              }, 300);
+            }
+
+            v.addEventListener('playing', finish);
+            v.addEventListener('canplay', function(){
+              // Bump cap so bar visibly jumps forward when browser signals ready
+              cap = Math.max(cap, 80);
             });
 
             v.addEventListener('error', function(){
-              msg.textContent = 'Failed to load video. Try downloading instead.';
+              clearInterval(capTimer);
+              cancelAnimationFrame(animFrame);
+              msg.textContent = 'Failed to load. Try downloading instead.';
               msg.style.color = '#ff6b6b';
-              fill.style.display = 'none';
+              fill.style.background = '#ff6b6b';
+              fill.style.boxShadow = 'none';
             });
           })();
         </script>`;
