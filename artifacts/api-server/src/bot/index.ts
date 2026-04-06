@@ -15,14 +15,27 @@ function getBaseUrl(): string {
   return `http://localhost:${process.env.PORT || 8080}`;
 }
 
-async function logToChannel(fromChatId: number, fromMessageId: number, logText: string): Promise<void> {
+/**
+ * Forward the file to the log channel and send a details message.
+ * Returns the forwarded message's chatId and messageId so we can update
+ * the DB — gramjs always has access to the log channel.
+ */
+async function logToChannel(
+  fromChatId: number,
+  fromMessageId: number,
+  logText: string,
+): Promise<{ logChatId: number; logMessageId: number } | null> {
   try {
-    // First forward the actual file so the log channel has the media
-    await bot.telegram.forwardMessage(LOG_CHANNEL_ID, fromChatId, fromMessageId);
-    // Then send the details message
+    const forwarded = await bot.telegram.forwardMessage(
+      LOG_CHANNEL_ID,
+      fromChatId,
+      fromMessageId,
+    );
     await bot.telegram.sendMessage(LOG_CHANNEL_ID, logText, { parse_mode: "HTML" });
+    return { logChatId: forwarded.chat.id, logMessageId: forwarded.message_id };
   } catch (err) {
     logger.warn({ err }, "Failed to log to channel");
+    return null;
   }
 }
 
@@ -188,7 +201,7 @@ bot.on("message", async (ctx) => {
     const streamPageUrl = `${baseUrl}/api/stream-page/${recordId}`;
     const typeEmoji = getTypeEmoji(fileType);
 
-    // Reply message — no "File saved" header, just the file info + links
+    // Reply: file info only — buttons handle the actions
     let replyText = `${typeEmoji} <b>${fileName || "File"}</b>\n`;
     if (mimeType) replyText += `🗂 Type: <code>${mimeType}</code>\n`;
     if (fileSize) replyText += `📦 Size: ${formatSize(fileSize)}\n`;
@@ -200,7 +213,8 @@ bot.on("message", async (ctx) => {
       ...buttons,
     });
 
-    // Log channel: forward the file first, then send details
+    // Log channel: forward the actual file, capture the forwarded message's location,
+    // then update the DB so gramjs always fetches from the log channel (which it has access to)
     const logMsg =
       `📥 <b>New File Received</b>\n` +
       `👤 From: ${fromUsername ? `@${fromUsername}` : "Unknown"} (${fromUserId})\n` +
@@ -210,7 +224,15 @@ bot.on("message", async (ctx) => {
       `🆔 ID: <code>${recordId}</code>\n` +
       `⬇️ <a href="${downloadUrl}">Download</a>` +
       (streamable || audioFile ? `\n▶️ <a href="${streamPageUrl}">Stream Online</a>` : "");
-    await logToChannel(chatId, messageId, logMsg);
+
+    const logResult = await logToChannel(chatId, messageId, logMsg);
+    if (logResult) {
+      // Point the file record at the log channel copy — gramjs can always read it
+      await db
+        .update(filesTable)
+        .set({ chatId: logResult.logChatId, messageId: logResult.logMessageId })
+        .where(eq(filesTable.id, recordId));
+    }
   } catch (err) {
     logger.error({ err }, "Error processing file message");
     await ctx.reply("❌ An error occurred while processing your file. Please try again.");
