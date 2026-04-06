@@ -225,7 +225,7 @@ router.get("/stream-page/:id", async (req, res) => {
     </div>
   </div>
   <div class="watermark">
-    <a href="https://t.me/takezo_5" target="_blank" rel="noopener noreferrer">takezo_<span>5</span></a>
+    <a href="https://t.me/takezo_5" target="_blank" rel="noopener noreferrer">tak<span>ezo_5</span></a>
   </div>
 </body>
 </html>`;

@@ -42,10 +42,6 @@ bot.start(async (ctx) => {
         let msg = `${getTypeEmoji(file.fileType || "document")} <b>${fileLabel}</b>\n`;
         if (file.mimeType) msg += `🗂 Type: <code>${file.mimeType}</code>\n`;
         if (file.fileSize) msg += `📦 Size: ${formatSize(file.fileSize)}\n`;
-        msg += `\n⬇️ <a href="${baseUrl}/api/download/${file.id}">Download</a>`;
-        if (streamable || audioFile) {
-          msg += `\n▶️ <a href="${baseUrl}/api/stream-page/${file.id}">Stream Online</a>`;
-        }
 
         const buttons = buildButtons(baseUrl, file.id, streamable || audioFile);
         await ctx.replyWithHTML(msg, buttons);
@@ -197,10 +193,6 @@ bot.on("message", async (ctx) => {
     if (mimeType) replyText += `🗂 Type: <code>${mimeType}</code>\n`;
     if (fileSize) replyText += `📦 Size: ${formatSize(fileSize)}\n`;
     if (duration) replyText += `⏱ Duration: ${formatDuration(duration)}\n`;
-    replyText += `\n⬇️ <a href="${downloadUrl}">Download</a>`;
-    if (streamable || audioFile) {
-      replyText += `\n▶️ <a href="${streamPageUrl}">Stream Online</a>`;
-    }
 
     const buttons = buildButtons(baseUrl, recordId, streamable || audioFile);
     await ctx.replyWithHTML(replyText, {
