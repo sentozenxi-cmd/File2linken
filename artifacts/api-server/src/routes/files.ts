@@ -85,81 +85,58 @@ router.get("/stream-page/:id", async (req, res) => {
     let mediaPlayer = "";
     if (isVideo) {
       mediaPlayer = `
-        <div id="loading-stage">
-          <div class="load-label" id="load-label">Preparing your video…</div>
-          <div class="load-bar-bg">
-            <div class="load-bar-fill" id="load-bar-fill"></div>
-          </div>
-          <div class="load-pct" id="load-pct">0%</div>
-        </div>
-        <div id="enjoy-banner" style="display:none;">
-          <span style="color:#fff;font-weight:700;">Enjoy </span><span style="color:var(--neon);font-weight:800;">the Video</span>
-        </div>
-        <div class="media-container" id="player-wrap" style="display:none;">
+        <div class="media-container">
           <video id="player" controls preload="auto" controlsList="nodownload" style="width:100%;display:block;">
             <source src="${videoStreamUrl}" type="video/mp4">
           </video>
         </div>
+        <div id="load-status">
+          <div class="load-bar-bg">
+            <div class="load-bar-fill" id="load-bar-fill"></div>
+          </div>
+          <div id="load-msg" class="load-msg">Loading…</div>
+        </div>
+        <div id="enjoy-banner" style="display:none;">
+          <span class="enjoy-enjoy">Enjoy </span><span class="enjoy-video">the Video</span>
+        </div>
         <script>
           (function(){
-            var fileId = '${file.id}';
-            var loadStage = document.getElementById('loading-stage');
-            var loadFill  = document.getElementById('load-bar-fill');
-            var loadPct   = document.getElementById('load-pct');
-            var loadLabel = document.getElementById('load-label');
-            var banner    = document.getElementById('enjoy-banner');
-            var wrap      = document.getElementById('player-wrap');
-            var v         = document.getElementById('player');
-            var done = false;
+            var v      = document.getElementById('player');
+            var status = document.getElementById('load-status');
+            var fill   = document.getElementById('load-bar-fill');
+            var msg    = document.getElementById('load-msg');
+            var banner = document.getElementById('enjoy-banner');
+            var played = false;
 
-            function showPlayer(){
-              if(done) return;
-              done = true;
-              loadFill.style.width = '100%';
-              loadPct.textContent = '100%';
+            function updateBuffer(){
+              if(played || !v.duration) return;
+              try {
+                var buf = v.buffered.length ? v.buffered.end(v.buffered.length-1) : 0;
+                var pct = Math.min(100, Math.round((buf / v.duration) * 100));
+                fill.style.width = pct + '%';
+                msg.textContent = 'Loading… ' + pct + '%';
+              } catch(e){}
+            }
+
+            v.addEventListener('progress', updateBuffer);
+            v.addEventListener('waiting', function(){ msg.textContent = 'Buffering…'; });
+
+            v.addEventListener('playing', function(){
+              if(played) return;
+              played = true;
+              fill.style.width = '100%';
+              status.style.display = 'none';
+              banner.style.display = 'flex';
               setTimeout(function(){
-                loadStage.style.display = 'none';
-                banner.style.display = 'flex';
-                setTimeout(function(){
-                  banner.style.display = 'none';
-                  wrap.style.display = 'block';
-                  v.play().catch(function(){});
-                }, 1800);
-              }, 300);
-            }
-
-            function pollProgress(){
-              fetch('/api/video-progress/'+fileId)
-                .then(function(r){ return r.json(); })
-                .then(function(d){
-                  var pct = d.progress || 0;
-                  loadFill.style.width = pct+'%';
-                  loadPct.textContent = pct+'%';
-                  if(d.status === 'remuxing'){
-                    loadLabel.textContent = 'Optimising for fast playback…';
-                  } else if(pct > 0){
-                    loadLabel.textContent = 'Downloading… '+pct+'%';
-                  }
-                  if(d.status === 'ready'){ showPlayer(); }
-                  else if(d.status === 'error'){
-                    loadLabel.textContent = 'Failed to process video.';
-                  } else {
-                    setTimeout(pollProgress, 600);
-                  }
-                })
-                .catch(function(){ setTimeout(pollProgress, 1000); });
-            }
-
-            // Kick off the video request (triggers processing server-side) and poll
-            // We use fetch with no-op — the actual src load is separate
-            fetch('/api/stream-video/'+fileId, {method:'HEAD'}).catch(function(){});
-            setTimeout(pollProgress, 400);
+                banner.style.opacity = '0';
+                setTimeout(function(){ banner.style.display = 'none'; }, 600);
+              }, 2000);
+            });
 
             v.addEventListener('error', function(){
-              loadStage.style.display='none';
-              banner.style.display='none';
-              wrap.style.display='block';
-              wrap.innerHTML='<p style="color:#ff6b6b;font-family:Manrope,sans-serif;font-weight:700;padding:20px;text-align:center;">Failed to load video. Try downloading instead.</p>';
+              msg.textContent = 'Failed to load video. Try downloading instead.';
+              msg.style.color = '#ff6b6b';
+              fill.style.display = 'none';
             });
           })();
         </script>`;
@@ -259,36 +236,32 @@ router.get("/stream-page/:id", async (req, res) => {
     }
     .tag.hot { color: #001406; background: linear-gradient(135deg, var(--neon), var(--neon-2)); border-color: transparent; }
     .media-container { margin: 22px 0; border-radius: 22px; overflow: hidden; border: 1px solid rgba(0,255,106,.14); background: #000; position: relative; }
-    #loading-stage {
-      padding: 28px 0 18px;
-      display: flex; flex-direction: column; align-items: center; gap: 14px;
-    }
-    .load-label {
-      font-family: 'Manrope',sans-serif; font-weight: 700;
-      font-size: .92rem; color: var(--muted); letter-spacing: .4px;
-      transition: color .3s;
+    #load-status {
+      margin: 12px 0 4px;
+      display: flex; flex-direction: column; gap: 8px;
     }
     .load-bar-bg {
-      width: 100%; height: 6px; background: rgba(0,255,106,.12);
+      width: 100%; height: 5px; background: rgba(0,255,106,.12);
       border-radius: 99px; overflow: hidden;
     }
     .load-bar-fill {
       height: 100%; width: 0%;
       background: linear-gradient(90deg, var(--neon), var(--neon-2));
-      box-shadow: 0 0 10px rgba(0,255,106,.6);
+      box-shadow: 0 0 10px rgba(0,255,106,.55);
       border-radius: 99px;
-      transition: width .5s ease;
+      transition: width .4s ease;
     }
-    .load-pct {
-      font-family: 'Manrope',sans-serif; font-weight: 800;
-      font-size: .82rem; color: var(--neon); letter-spacing: .5px;
+    .load-msg {
+      font-family: 'Manrope',sans-serif; font-weight: 600;
+      font-size: .8rem; color: var(--muted); letter-spacing: .4px;
     }
     #enjoy-banner {
-      padding: 32px 0; display: flex; align-items: center; justify-content: center;
-      font-family: 'Manrope',sans-serif; font-size: 1.7rem; letter-spacing: .5px;
-      animation: fadeIn .4s ease;
+      padding: 18px 0 6px; display: flex; align-items: center; justify-content: center;
+      font-family: 'Manrope',sans-serif; font-size: 1.5rem; letter-spacing: .4px;
+      transition: opacity .6s ease;
     }
-    @keyframes fadeIn { from { opacity:0; transform: scale(.92); } to { opacity:1; transform: scale(1); } }
+    .enjoy-enjoy { color: #fff; font-weight: 700; }
+    .enjoy-video { color: var(--neon); font-weight: 800; }
     video, audio { width: 100%; display: block; }
     .audio-container { padding: 28px; display: grid; place-items: center; gap: 18px; background: linear-gradient(180deg, rgba(2,8,3,.95), rgba(0,0,0,.95)); }
     .audio-icon { font-size: 3.6rem; filter: drop-shadow(0 0 18px var(--glow)); }
