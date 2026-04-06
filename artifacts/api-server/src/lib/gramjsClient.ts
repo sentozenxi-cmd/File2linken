@@ -12,9 +12,9 @@ const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN!;
 const SESSION_FILE = path.resolve("telegram_session.txt");
 
 // Request size must be a multiple of 4096 for MTProto
-// 1MB chunks with 4 parallel workers = ~4MB/s+ effective throughput
-const REQUEST_SIZE = 1024 * 1024; // 1 MB per request
-const WORKERS = 4; // parallel download workers
+// 512KB chunks with 8 parallel workers = faster pipeline throughput
+const REQUEST_SIZE = 512 * 1024; // 512 KB per request
+const WORKERS = 8; // parallel download workers
 
 let _client: TelegramClient | null = null;
 let _connecting: Promise<TelegramClient> | null = null;

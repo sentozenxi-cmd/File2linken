@@ -19,10 +19,10 @@ export async function streamTelegramFile(
     if (rangeHeader && fileSize) {
       const parts = rangeHeader.replace(/bytes=/, "").split("-");
       const start = parseInt(parts[0] ?? "0", 10);
-      // Cap chunk size at 4MB for range requests (improves seek responsiveness)
+      // Cap chunk size at 10MB for range requests — larger chunks = fewer round trips = less buffering
       const end = parts[1]
         ? parseInt(parts[1], 10)
-        : Math.min(start + 4 * 1024 * 1024 - 1, fileSize - 1);
+        : Math.min(start + 10 * 1024 * 1024 - 1, fileSize - 1);
       const chunkSize = end - start + 1;
 
       res.status(206);

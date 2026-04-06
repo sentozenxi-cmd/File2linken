@@ -60,10 +60,58 @@ router.get("/stream-page/:id", async (req, res) => {
     if (isVideo) {
       mediaPlayer = `
         <div class="media-container" id="player-wrap">
-          <video id="player" controls preload="metadata" controlsList="nodownload">
+          <video id="player" controls preload="auto" controlsList="nodownload">
             <source src="${streamUrl}" type="${file.mimeType || "video/mp4"}">
           </video>
-        </div>`;
+        </div>
+        <script>
+          (function () {
+            var STREAM_URL = ${JSON.stringify(streamUrl)};
+            var FILE_SIZE = ${file.fileSize ? file.fileSize : "null"};
+            var PREFETCH_BYTES = 12 * 1024 * 1024; // 12 MB prefetch on load
+            var BUFFER_AHEAD = 30; // keep 30 s of buffer ahead while playing
+            var CHUNK_SIZE = 10 * 1024 * 1024; // 10 MB per on-demand chunk
+
+            function prefetchRange(start, end) {
+              if (!FILE_SIZE || start >= FILE_SIZE) return;
+              end = Math.min(end, FILE_SIZE - 1);
+              fetch(STREAM_URL, {
+                headers: { Range: 'bytes=' + start + '-' + end },
+                credentials: 'same-origin'
+              }).catch(function () {});
+            }
+
+            // Prefetch first 12 MB immediately so the player has data right away
+            if (FILE_SIZE) {
+              prefetchRange(0, Math.min(PREFETCH_BYTES - 1, FILE_SIZE - 1));
+            }
+
+            // While playing, keep buffer topped up ahead of current position
+            var video = document.getElementById('player');
+            var lastPrefetchEnd = PREFETCH_BYTES;
+
+            video.addEventListener('timeupdate', function () {
+              if (!FILE_SIZE || !video.duration) return;
+              var buffered = video.buffered;
+              var bufferEnd = 0;
+              for (var i = 0; i < buffered.length; i++) {
+                if (buffered.start(i) <= video.currentTime + 1) {
+                  bufferEnd = Math.max(bufferEnd, buffered.end(i));
+                }
+              }
+              var bufferAheadSecs = bufferEnd - video.currentTime;
+              if (bufferAheadSecs < BUFFER_AHEAD) {
+                var byteRate = FILE_SIZE / video.duration;
+                var prefetchFrom = Math.floor(bufferEnd * byteRate);
+                var prefetchTo = prefetchFrom + CHUNK_SIZE - 1;
+                if (prefetchFrom > lastPrefetchEnd - CHUNK_SIZE / 2) {
+                  lastPrefetchEnd = prefetchTo + 1;
+                  prefetchRange(prefetchFrom, prefetchTo);
+                }
+              }
+            });
+          })();
+        </script>`;
     } else if (isAudio) {
       mediaPlayer = `
         <div class="media-container audio-container">
