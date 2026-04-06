@@ -50,7 +50,7 @@ router.get("/stream-video/:id", async (req, res) => {
       return;
     }
     const file = rows[0]!;
-    await streamVideoFast(req, res, file.chatId, file.messageId, file.mimeType, file.fileName, file.fileSize);
+    await streamVideoFast(req, res, file.id, file.chatId, file.messageId, file.mimeType, file.fileName, file.fileSize);
   } catch (err) {
     req.log.error({ err }, "Stream-video error");
     if (!res.headersSent) res.status(500).send("Server error");
@@ -75,32 +75,60 @@ router.get("/stream-page/:id", async (req, res) => {
     const isAudio = file.isAudio || file.mimeType?.startsWith("audio/") || file.fileType === "audio" || file.fileType === "voice";
     const isImage = file.mimeType?.startsWith("image/") || file.fileType === "photo" || file.fileType === "sticker";
 
-    const isLargeFile = file.fileSize != null && file.fileSize > 200 * 1024 * 1024;
-    const loadingNote = isLargeFile
-      ? "Large file — streaming directly. Playback starts in a few seconds."
-      : "Optimising video for instant playback…";
-
     let mediaPlayer = "";
     if (isVideo) {
       mediaPlayer = `
         <div class="media-container" id="player-wrap" style="position:relative;min-height:220px;">
-          <div id="loading-overlay" style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;background:rgba(0,0,0,.7);z-index:10;border-radius:22px;">
+          <div id="loading-overlay" style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;background:rgba(0,0,0,.75);z-index:10;border-radius:22px;">
             <div class="spinner"></div>
-            <p style="color:var(--neon);font-family:'Manrope',sans-serif;font-weight:700;font-size:.9rem;letter-spacing:.5px;text-align:center;padding:0 20px;">${loadingNote}</p>
           </div>
           <video id="player" controls preload="auto" controlsList="nodownload" style="width:100%;display:block;">
             <source src="${videoStreamUrl}" type="video/mp4">
           </video>
         </div>
+        <div class="progress-bar-wrap" id="progress-wrap">
+          <div class="progress-bar-bg">
+            <div class="progress-bar-fill" id="progress-fill"></div>
+          </div>
+          <div class="progress-time" id="progress-time">0:00 / 0:00</div>
+        </div>
         <script>
           (function(){
             var v = document.getElementById('player');
             var ov = document.getElementById('loading-overlay');
+            var fill = document.getElementById('progress-fill');
+            var timeEl = document.getElementById('progress-time');
+            var wrap = document.getElementById('progress-wrap');
+
             function hide(){ if(ov) ov.style.display='none'; }
             v.addEventListener('canplay', hide);
             v.addEventListener('playing', hide);
             v.addEventListener('error', function(){
               if(ov){ ov.innerHTML='<p style="color:#ff6b6b;font-family:Manrope,sans-serif;font-weight:700;padding:20px;text-align:center;">Failed to load video. Try downloading instead.</p>'; }
+            });
+
+            function fmt(s){
+              s = Math.floor(s||0);
+              var h=Math.floor(s/3600), m=Math.floor((s%3600)/60), sec=s%60;
+              if(h>0) return h+':'+String(m).padStart(2,'0')+':'+String(sec).padStart(2,'0');
+              return m+':'+String(sec).padStart(2,'0');
+            }
+
+            v.addEventListener('timeupdate', function(){
+              var pct = v.duration ? (v.currentTime/v.duration)*100 : 0;
+              fill.style.width = pct+'%';
+              timeEl.textContent = fmt(v.currentTime)+' / '+fmt(v.duration);
+            });
+
+            v.addEventListener('loadedmetadata', function(){
+              wrap.style.display='flex';
+            });
+
+            // Click on progress bar to seek
+            document.querySelector('.progress-bar-bg').addEventListener('click', function(e){
+              var rect = this.getBoundingClientRect();
+              var pct = (e.clientX - rect.left) / rect.width;
+              v.currentTime = pct * v.duration;
             });
           })();
         </script>`;
@@ -202,6 +230,20 @@ router.get("/stream-page/:id", async (req, res) => {
     .media-container { margin: 22px 0; border-radius: 22px; overflow: hidden; border: 1px solid rgba(0,255,106,.14); background: #000; position: relative; }
     @keyframes spin { to { transform: rotate(360deg); } }
     .spinner { width: 44px; height: 44px; border: 3px solid rgba(0,255,106,.2); border-top-color: var(--neon); border-radius: 50%; animation: spin .8s linear infinite; }
+    .progress-bar-wrap { display: none; align-items: center; gap: 14px; margin: 10px 0 4px; }
+    .progress-bar-bg {
+      flex: 1; height: 5px; background: rgba(0,255,106,.15);
+      border-radius: 99px; cursor: pointer; overflow: hidden;
+      transition: height .15s;
+    }
+    .progress-bar-bg:hover { height: 8px; }
+    .progress-bar-fill {
+      height: 100%; width: 0%; border-radius: 99px;
+      background: linear-gradient(90deg, var(--neon), var(--neon-2));
+      box-shadow: 0 0 8px rgba(0,255,106,.6);
+      transition: width .25s linear;
+    }
+    .progress-time { font-size: .78rem; color: var(--muted); font-family: 'Manrope',sans-serif; font-weight: 600; white-space: nowrap; letter-spacing: .4px; }
     video, audio { width: 100%; display: block; }
     .audio-container { padding: 28px; display: grid; place-items: center; gap: 18px; background: linear-gradient(180deg, rgba(2,8,3,.95), rgba(0,0,0,.95)); }
     .audio-icon { font-size: 3.6rem; filter: drop-shadow(0 0 18px var(--glow)); }

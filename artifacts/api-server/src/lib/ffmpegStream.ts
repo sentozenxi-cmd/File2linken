@@ -5,26 +5,28 @@ import * as os from "os";
 import type { Request, Response } from "express";
 import { streamFileByMessage } from "./gramjsClient.js";
 import { logger } from "./logger.js";
+import { getCached, getProcessing, setProcessing, setReady, evict } from "./videoCache.js";
 
 const TEMP_DIR = os.tmpdir();
-// Files under this size get the fast-start treatment (download → remux → stream)
-const FAST_START_MAX_BYTES = 200 * 1024 * 1024; // 200 MB
+// Files up to this size get the fast-start treatment (download → remux → cache → stream)
+const FAST_START_MAX_BYTES = 500 * 1024 * 1024; // 500 MB
 
 /**
- * Streams a Telegram video to the browser.
+ * Streams a Telegram video.
  *
- * For files ≤ 200 MB:
- *   Downloads to a temp file, remuxes with ffmpeg -movflags +faststart so
- *   the moov atom is at the very start, then streams the result. The browser
- *   starts playing within seconds of the remux finishing.
+ * For files ≤ 500 MB:
+ *   Downloads to a temp file once, remuxes with ffmpeg +faststart so the
+ *   moov atom is at the front, caches the result for 30 min, and serves
+ *   all subsequent range requests from the cached file instantly — no
+ *   Telegram re-downloads, no stutter.
  *
- * For files > 200 MB:
- *   Falls back to direct streaming with range-request support. The browser
- *   may seek to the end to find the moov atom, but this is handled natively.
+ * For files > 500 MB:
+ *   Falls back to direct range streaming from Telegram.
  */
 export async function streamVideoFast(
   req: Request,
   res: Response,
+  videoId: string,
   chatId: number,
   messageId: number,
   mimeType: string | null | undefined,
@@ -34,34 +36,59 @@ export async function streamVideoFast(
   const useFastStart = fileSize == null || fileSize <= FAST_START_MAX_BYTES;
 
   if (useFastStart) {
-    await streamWithFastStart(req, res, chatId, messageId, fileName, fileSize);
+    await streamWithCache(req, res, videoId, chatId, messageId);
   } else {
-    await streamDirect(req, res, chatId, messageId, mimeType, fileName, fileSize);
+    await streamDirect(req, res, chatId, messageId, mimeType, fileSize!);
   }
 }
 
-async function streamWithFastStart(
+async function streamWithCache(
   req: Request,
   res: Response,
+  videoId: string,
   chatId: number,
   messageId: number,
-  fileName: string | null | undefined,
-  fileSize: number | null | undefined,
 ): Promise<void> {
-  const tmpInput = path.join(TEMP_DIR, `f2l-in-${Date.now()}-${Math.random().toString(36).slice(2)}.tmp`);
-  const tmpOutput = path.join(TEMP_DIR, `f2l-out-${Date.now()}-${Math.random().toString(36).slice(2)}.mp4`);
+  try {
+    // 1. Check cache first
+    let cached = getCached(videoId);
 
-  const cleanup = () => {
-    try { fs.unlinkSync(tmpInput); } catch {}
-    try { fs.unlinkSync(tmpOutput); } catch {}
-  };
+    if (!cached) {
+      // Check if another request is already processing this video
+      let processing = getProcessing(videoId);
 
-  req.on("close", cleanup);
+      if (!processing) {
+        // We're the first — start processing
+        processing = processVideoToCache(videoId, chatId, messageId);
+        setProcessing(videoId, processing);
+      }
+
+      // Wait for processing to finish
+      await processing;
+      cached = getCached(videoId);
+    }
+
+    if (!cached) {
+      throw new Error("Video cache entry missing after processing");
+    }
+
+    // 2. Serve from cached temp file with full range-request support
+    serveFromFile(req, res, cached.path, cached.size);
+
+  } catch (err) {
+    logger.error({ err, videoId }, "streamWithCache error");
+    if (!res.headersSent) res.status(500).send("Streaming error");
+  }
+}
+
+async function processVideoToCache(videoId: string, chatId: number, messageId: number): Promise<void> {
+  const tmpInput = path.join(TEMP_DIR, `f2l-in-${videoId}.tmp`);
+  const tmpOutput = path.join(TEMP_DIR, `f2l-out-${videoId}.mp4`);
 
   try {
-    logger.info({ fileSize }, "Downloading video to temp for fast-start remux");
+    logger.info({ videoId }, "Downloading video for fast-start cache");
 
-    // 1. Download from Telegram → temp file
+    // Download from Telegram → temp input file
     const writeStream = fs.createWriteStream(tmpInput);
     await new Promise<void>((resolve, reject) => {
       writeStream.on("error", reject);
@@ -72,9 +99,9 @@ async function streamWithFastStart(
       }).then(() => writeStream.end()).catch(reject);
     });
 
-    logger.info("Download complete, running ffmpeg fast-start");
+    logger.info({ videoId }, "Download complete, running ffmpeg fast-start");
 
-    // 2. ffmpeg remux with moov at front
+    // ffmpeg remux with moov at front
     await new Promise<void>((resolve, reject) => {
       const ff = spawn("ffmpeg", [
         "-y",
@@ -94,54 +121,48 @@ async function streamWithFastStart(
       ff.on("error", reject);
     });
 
-    logger.info("ffmpeg fast-start done, streaming to browser");
+    // Delete the input temp file — we only need the output
+    try { fs.unlinkSync(tmpInput); } catch {}
 
-    // 3. Stream the remuxed file to browser with range support
     const stat = fs.statSync(tmpOutput);
-    const totalSize = stat.size;
-    const rangeHeader = req.headers["range"];
-
-    if (rangeHeader) {
-      const parts = rangeHeader.replace(/bytes=/, "").split("-");
-      const start = parseInt(parts[0] ?? "0", 10);
-      const end = parts[1] ? parseInt(parts[1], 10) : totalSize - 1;
-      const chunkSize = end - start + 1;
-
-      res.status(206);
-      res.setHeader("Content-Range", `bytes ${start}-${end}/${totalSize}`);
-      res.setHeader("Accept-Ranges", "bytes");
-      res.setHeader("Content-Length", String(chunkSize));
-      res.setHeader("Content-Type", "video/mp4");
-      res.setHeader("Cache-Control", "no-store");
-
-      const fileStream = fs.createReadStream(tmpOutput, { start, end });
-      fileStream.on("error", (err) => {
-        logger.error({ err }, "Error reading temp output for range");
-        cleanup();
-      });
-      fileStream.pipe(res);
-      fileStream.on("end", cleanup);
-    } else {
-      res.status(200);
-      res.setHeader("Content-Type", "video/mp4");
-      res.setHeader("Content-Length", String(totalSize));
-      res.setHeader("Accept-Ranges", "bytes");
-      res.setHeader("Cache-Control", "no-store");
-
-      const fileStream = fs.createReadStream(tmpOutput);
-      fileStream.on("error", (err) => {
-        logger.error({ err }, "Error reading temp output");
-        cleanup();
-      });
-      fileStream.pipe(res);
-      fileStream.on("end", cleanup);
-    }
+    setReady(videoId, tmpOutput, stat.size);
+    logger.info({ videoId, size: stat.size }, "Video cached and ready");
 
   } catch (err) {
-    cleanup();
-    logger.error({ err }, "streamWithFastStart error");
-    if (!res.headersSent) res.status(500).send("Streaming error");
-    else if (!res.writableEnded) { try { res.end(); } catch {} }
+    try { fs.unlinkSync(tmpInput); } catch {}
+    try { fs.unlinkSync(tmpOutput); } catch {}
+    evict(videoId);
+    throw err;
+  }
+}
+
+function serveFromFile(req: Request, res: Response, filePath: string, totalSize: number): void {
+  const rangeHeader = req.headers["range"];
+
+  res.setHeader("Content-Type", "video/mp4");
+  res.setHeader("Accept-Ranges", "bytes");
+  res.setHeader("Cache-Control", "no-store");
+
+  if (rangeHeader) {
+    const parts = rangeHeader.replace(/bytes=/, "").split("-");
+    const start = parseInt(parts[0] ?? "0", 10);
+    const end = parts[1] ? parseInt(parts[1], 10) : totalSize - 1;
+    const chunkSize = end - start + 1;
+
+    res.status(206);
+    res.setHeader("Content-Range", `bytes ${start}-${end}/${totalSize}`);
+    res.setHeader("Content-Length", String(chunkSize));
+
+    const fileStream = fs.createReadStream(filePath, { start, end });
+    fileStream.on("error", (err) => { logger.error({ err }, "serveFromFile range error"); });
+    fileStream.pipe(res);
+  } else {
+    res.status(200);
+    res.setHeader("Content-Length", String(totalSize));
+
+    const fileStream = fs.createReadStream(filePath);
+    fileStream.on("error", (err) => { logger.error({ err }, "serveFromFile full error"); });
+    fileStream.pipe(res);
   }
 }
 
@@ -151,7 +172,6 @@ async function streamDirect(
   chatId: number,
   messageId: number,
   mimeType: string | null | undefined,
-  fileName: string | null | undefined,
   fileSize: number,
 ): Promise<void> {
   let aborted = false;
@@ -161,7 +181,7 @@ async function streamDirect(
     const contentType = mimeType || "video/mp4";
     const rangeHeader = req.headers["range"];
 
-    if (rangeHeader && fileSize) {
+    if (rangeHeader) {
       const parts = rangeHeader.replace(/bytes=/, "").split("-");
       const start = parseInt(parts[0] ?? "0", 10);
       const end = parts[1]
