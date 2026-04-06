@@ -5,7 +5,7 @@ import * as os from "os";
 import type { Request, Response } from "express";
 import { streamFileByMessage } from "./gramjsClient.js";
 import { logger } from "./logger.js";
-import { getCached, getProcessing, setProcessing, setReady, evict } from "./videoCache.js";
+import { getCached, getProcessing, setProcessing, setReady, setProgress, setError, evict } from "./videoCache.js";
 
 const TEMP_DIR = os.tmpdir();
 // Files up to this size get the fast-start treatment (download → remux → cache → stream)
@@ -36,7 +36,7 @@ export async function streamVideoFast(
   const useFastStart = fileSize == null || fileSize <= FAST_START_MAX_BYTES;
 
   if (useFastStart) {
-    await streamWithCache(req, res, videoId, chatId, messageId);
+    await streamWithCache(req, res, videoId, chatId, messageId, fileSize);
   } else {
     await streamDirect(req, res, chatId, messageId, mimeType, fileSize!);
   }
@@ -48,6 +48,7 @@ async function streamWithCache(
   videoId: string,
   chatId: number,
   messageId: number,
+  fileSize: number | null | undefined,
 ): Promise<void> {
   try {
     // 1. Check cache first
@@ -59,7 +60,7 @@ async function streamWithCache(
 
       if (!processing) {
         // We're the first — start processing
-        processing = processVideoToCache(videoId, chatId, messageId);
+        processing = processVideoToCache(videoId, chatId, messageId, fileSize);
         setProcessing(videoId, processing);
       }
 
@@ -81,27 +82,38 @@ async function streamWithCache(
   }
 }
 
-async function processVideoToCache(videoId: string, chatId: number, messageId: number): Promise<void> {
+async function processVideoToCache(
+  videoId: string,
+  chatId: number,
+  messageId: number,
+  fileSize: number | null | undefined,
+): Promise<void> {
   const tmpInput = path.join(TEMP_DIR, `f2l-in-${videoId}.tmp`);
   const tmpOutput = path.join(TEMP_DIR, `f2l-out-${videoId}.mp4`);
 
   try {
     logger.info({ videoId }, "Downloading video for fast-start cache");
 
-    // Download from Telegram → temp input file
+    let bytesDownloaded = 0;
     const writeStream = fs.createWriteStream(tmpInput);
+
     await new Promise<void>((resolve, reject) => {
       writeStream.on("error", reject);
       writeStream.on("finish", resolve);
       streamFileByMessage(chatId, messageId, (chunk) => {
+        bytesDownloaded += chunk.length;
+        if (fileSize && fileSize > 0) {
+          const pct = Math.min(90, Math.round((bytesDownloaded / fileSize) * 90));
+          setProgress(videoId, pct, "downloading");
+        }
         writeStream.write(chunk);
         return true;
       }).then(() => writeStream.end()).catch(reject);
     });
 
+    setProgress(videoId, 92, "remuxing");
     logger.info({ videoId }, "Download complete, running ffmpeg fast-start");
 
-    // ffmpeg remux with moov at front
     await new Promise<void>((resolve, reject) => {
       const ff = spawn("ffmpeg", [
         "-y",
@@ -121,7 +133,6 @@ async function processVideoToCache(videoId: string, chatId: number, messageId: n
       ff.on("error", reject);
     });
 
-    // Delete the input temp file — we only need the output
     try { fs.unlinkSync(tmpInput); } catch {}
 
     const stat = fs.statSync(tmpOutput);
@@ -131,6 +142,7 @@ async function processVideoToCache(videoId: string, chatId: number, messageId: n
   } catch (err) {
     try { fs.unlinkSync(tmpInput); } catch {}
     try { fs.unlinkSync(tmpOutput); } catch {}
+    setError(videoId);
     evict(videoId);
     throw err;
   }

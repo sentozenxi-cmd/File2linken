@@ -4,6 +4,7 @@ import { filesTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { streamTelegramFile } from "../lib/telegramStream.js";
 import { streamVideoFast } from "../lib/ffmpegStream.js";
+import { getProgress } from "../lib/videoCache.js";
 import { formatFileSize, getFileTypeLabel } from "../lib/fileUtils.js";
 
 const router = Router();
@@ -57,6 +58,12 @@ router.get("/stream-video/:id", async (req, res) => {
   }
 });
 
+// Progress polling for the loading bar
+router.get("/video-progress/:id", (req, res) => {
+  const { progress, status } = getProgress(req.params.id!);
+  res.json({ progress, status });
+});
+
 router.get("/stream-page/:id", async (req, res) => {
   try {
     const rows = await db.select().from(filesTable).where(eq(filesTable.id, req.params.id!)).limit(1);
@@ -78,57 +85,81 @@ router.get("/stream-page/:id", async (req, res) => {
     let mediaPlayer = "";
     if (isVideo) {
       mediaPlayer = `
-        <div class="media-container" id="player-wrap" style="position:relative;min-height:220px;">
-          <div id="loading-overlay" style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;background:rgba(0,0,0,.75);z-index:10;border-radius:22px;">
-            <div class="spinner"></div>
+        <div id="loading-stage">
+          <div class="load-label" id="load-label">Preparing your video…</div>
+          <div class="load-bar-bg">
+            <div class="load-bar-fill" id="load-bar-fill"></div>
           </div>
+          <div class="load-pct" id="load-pct">0%</div>
+        </div>
+        <div id="enjoy-banner" style="display:none;">
+          <span style="color:#fff;font-weight:700;">Enjoy </span><span style="color:var(--neon);font-weight:800;">the Video</span>
+        </div>
+        <div class="media-container" id="player-wrap" style="display:none;">
           <video id="player" controls preload="auto" controlsList="nodownload" style="width:100%;display:block;">
             <source src="${videoStreamUrl}" type="video/mp4">
           </video>
         </div>
-        <div class="progress-bar-wrap" id="progress-wrap">
-          <div class="progress-bar-bg">
-            <div class="progress-bar-fill" id="progress-fill"></div>
-          </div>
-          <div class="progress-time" id="progress-time">0:00 / 0:00</div>
-        </div>
         <script>
           (function(){
-            var v = document.getElementById('player');
-            var ov = document.getElementById('loading-overlay');
-            var fill = document.getElementById('progress-fill');
-            var timeEl = document.getElementById('progress-time');
-            var wrap = document.getElementById('progress-wrap');
+            var fileId = '${file.id}';
+            var loadStage = document.getElementById('loading-stage');
+            var loadFill  = document.getElementById('load-bar-fill');
+            var loadPct   = document.getElementById('load-pct');
+            var loadLabel = document.getElementById('load-label');
+            var banner    = document.getElementById('enjoy-banner');
+            var wrap      = document.getElementById('player-wrap');
+            var v         = document.getElementById('player');
+            var done = false;
 
-            function hide(){ if(ov) ov.style.display='none'; }
-            v.addEventListener('canplay', hide);
-            v.addEventListener('playing', hide);
-            v.addEventListener('error', function(){
-              if(ov){ ov.innerHTML='<p style="color:#ff6b6b;font-family:Manrope,sans-serif;font-weight:700;padding:20px;text-align:center;">Failed to load video. Try downloading instead.</p>'; }
-            });
-
-            function fmt(s){
-              s = Math.floor(s||0);
-              var h=Math.floor(s/3600), m=Math.floor((s%3600)/60), sec=s%60;
-              if(h>0) return h+':'+String(m).padStart(2,'0')+':'+String(sec).padStart(2,'0');
-              return m+':'+String(sec).padStart(2,'0');
+            function showPlayer(){
+              if(done) return;
+              done = true;
+              loadFill.style.width = '100%';
+              loadPct.textContent = '100%';
+              setTimeout(function(){
+                loadStage.style.display = 'none';
+                banner.style.display = 'flex';
+                setTimeout(function(){
+                  banner.style.display = 'none';
+                  wrap.style.display = 'block';
+                  v.play().catch(function(){});
+                }, 1800);
+              }, 300);
             }
 
-            v.addEventListener('timeupdate', function(){
-              var pct = v.duration ? (v.currentTime/v.duration)*100 : 0;
-              fill.style.width = pct+'%';
-              timeEl.textContent = fmt(v.currentTime)+' / '+fmt(v.duration);
-            });
+            function pollProgress(){
+              fetch('/api/video-progress/'+fileId)
+                .then(function(r){ return r.json(); })
+                .then(function(d){
+                  var pct = d.progress || 0;
+                  loadFill.style.width = pct+'%';
+                  loadPct.textContent = pct+'%';
+                  if(d.status === 'remuxing'){
+                    loadLabel.textContent = 'Optimising for fast playback…';
+                  } else if(pct > 0){
+                    loadLabel.textContent = 'Downloading… '+pct+'%';
+                  }
+                  if(d.status === 'ready'){ showPlayer(); }
+                  else if(d.status === 'error'){
+                    loadLabel.textContent = 'Failed to process video.';
+                  } else {
+                    setTimeout(pollProgress, 600);
+                  }
+                })
+                .catch(function(){ setTimeout(pollProgress, 1000); });
+            }
 
-            v.addEventListener('loadedmetadata', function(){
-              wrap.style.display='flex';
-            });
+            // Kick off the video request (triggers processing server-side) and poll
+            // We use fetch with no-op — the actual src load is separate
+            fetch('/api/stream-video/'+fileId, {method:'HEAD'}).catch(function(){});
+            setTimeout(pollProgress, 400);
 
-            // Click on progress bar to seek
-            document.querySelector('.progress-bar-bg').addEventListener('click', function(e){
-              var rect = this.getBoundingClientRect();
-              var pct = (e.clientX - rect.left) / rect.width;
-              v.currentTime = pct * v.duration;
+            v.addEventListener('error', function(){
+              loadStage.style.display='none';
+              banner.style.display='none';
+              wrap.style.display='block';
+              wrap.innerHTML='<p style="color:#ff6b6b;font-family:Manrope,sans-serif;font-weight:700;padding:20px;text-align:center;">Failed to load video. Try downloading instead.</p>';
             });
           })();
         </script>`;
@@ -228,22 +259,36 @@ router.get("/stream-page/:id", async (req, res) => {
     }
     .tag.hot { color: #001406; background: linear-gradient(135deg, var(--neon), var(--neon-2)); border-color: transparent; }
     .media-container { margin: 22px 0; border-radius: 22px; overflow: hidden; border: 1px solid rgba(0,255,106,.14); background: #000; position: relative; }
-    @keyframes spin { to { transform: rotate(360deg); } }
-    .spinner { width: 44px; height: 44px; border: 3px solid rgba(0,255,106,.2); border-top-color: var(--neon); border-radius: 50%; animation: spin .8s linear infinite; }
-    .progress-bar-wrap { display: none; align-items: center; gap: 14px; margin: 10px 0 4px; }
-    .progress-bar-bg {
-      flex: 1; height: 5px; background: rgba(0,255,106,.15);
-      border-radius: 99px; cursor: pointer; overflow: hidden;
-      transition: height .15s;
+    #loading-stage {
+      padding: 28px 0 18px;
+      display: flex; flex-direction: column; align-items: center; gap: 14px;
     }
-    .progress-bar-bg:hover { height: 8px; }
-    .progress-bar-fill {
-      height: 100%; width: 0%; border-radius: 99px;
+    .load-label {
+      font-family: 'Manrope',sans-serif; font-weight: 700;
+      font-size: .92rem; color: var(--muted); letter-spacing: .4px;
+      transition: color .3s;
+    }
+    .load-bar-bg {
+      width: 100%; height: 6px; background: rgba(0,255,106,.12);
+      border-radius: 99px; overflow: hidden;
+    }
+    .load-bar-fill {
+      height: 100%; width: 0%;
       background: linear-gradient(90deg, var(--neon), var(--neon-2));
-      box-shadow: 0 0 8px rgba(0,255,106,.6);
-      transition: width .25s linear;
+      box-shadow: 0 0 10px rgba(0,255,106,.6);
+      border-radius: 99px;
+      transition: width .5s ease;
     }
-    .progress-time { font-size: .78rem; color: var(--muted); font-family: 'Manrope',sans-serif; font-weight: 600; white-space: nowrap; letter-spacing: .4px; }
+    .load-pct {
+      font-family: 'Manrope',sans-serif; font-weight: 800;
+      font-size: .82rem; color: var(--neon); letter-spacing: .5px;
+    }
+    #enjoy-banner {
+      padding: 32px 0; display: flex; align-items: center; justify-content: center;
+      font-family: 'Manrope',sans-serif; font-size: 1.7rem; letter-spacing: .5px;
+      animation: fadeIn .4s ease;
+    }
+    @keyframes fadeIn { from { opacity:0; transform: scale(.92); } to { opacity:1; transform: scale(1); } }
     video, audio { width: 100%; display: block; }
     .audio-container { padding: 28px; display: grid; place-items: center; gap: 18px; background: linear-gradient(180deg, rgba(2,8,3,.95), rgba(0,0,0,.95)); }
     .audio-icon { font-size: 3.6rem; filter: drop-shadow(0 0 18px var(--glow)); }
