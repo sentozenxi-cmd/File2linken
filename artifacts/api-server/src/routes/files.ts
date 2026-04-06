@@ -56,44 +56,14 @@ router.get("/stream-page/:id", async (req, res) => {
     const isAudio = file.isAudio || file.mimeType?.startsWith("audio/") || file.fileType === "audio" || file.fileType === "voice";
     const isImage = file.mimeType?.startsWith("image/") || file.fileType === "photo" || file.fileType === "sticker";
 
-    // Detect formats browsers cannot play natively — show external-player fallback
-    const noBrowserPlay = file.mimeType === "video/x-matroska" ||
-      file.mimeType === "video/x-msvideo" ||
-      file.mimeType === "video/x-ms-wmv" ||
-      (file.mimeType?.startsWith("video/") && !["video/mp4","video/webm","video/ogg"].includes(file.mimeType || ""));
-
-    const externalPlayerBlock = `
-      <div class="ext-player" id="ext-player">
-        <div class="ext-icon">📺</div>
-        <p class="ext-title">Browser can't play this format</p>
-        <p class="ext-sub">Open the stream link in VLC, MX Player, or any media player</p>
-        <div class="stream-url-box">
-          <span id="stream-url-text" class="stream-url-text"></span>
-          <button class="copy-btn" onclick="copyStreamUrl()">Copy</button>
-        </div>
-        <a class="btn btn-vlc" id="vlc-btn" href="#">Open in VLC</a>
-      </div>`;
-
     let mediaPlayer = "";
     if (isVideo) {
-      if (noBrowserPlay) {
-        mediaPlayer = `<div class="media-container">${externalPlayerBlock}</div>`;
-      } else {
-        mediaPlayer = `
-          <div class="media-container">
-            <video id="player" controls preload="metadata" controlsList="nodownload"
-              onerror="document.getElementById('player-wrap').style.display='none';document.getElementById('ext-player').style.display='flex'">
-              <source src="${streamUrl}" type="${file.mimeType || "video/mp4"}">
-            </video>
-            <div id="ext-player" style="display:none">${externalPlayerBlock.replace(/<div class="ext-player"[^>]*>/, "").replace(/<\/div>\s*$/, "")}</div>
-          </div>`;
-        // Simpler: always wrap
-        mediaPlayer = `
-          <div class="media-container" id="player-wrap">
-            <video id="player" controls preload="metadata" controlsList="nodownload"></video>
-          </div>
-          ${externalPlayerBlock}`;
-      }
+      mediaPlayer = `
+        <div class="media-container" id="player-wrap">
+          <video id="player" controls preload="metadata" controlsList="nodownload">
+            <source src="${streamUrl}" type="${file.mimeType || "video/mp4"}">
+          </video>
+        </div>`;
     } else if (isAudio) {
       mediaPlayer = `
         <div class="media-container audio-container">
