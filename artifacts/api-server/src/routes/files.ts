@@ -214,6 +214,7 @@ router.get("/stream-page/:id", async (req, res) => {
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>${escHtml(fileLabel)} — File2Link BOT</title>
   <link rel="stylesheet" href="https://cdn.plyr.io/3.7.8/plyr.css">
+  <script src="https://cdn.plyr.io/3.7.8/plyr.polyfilled.js"></script>
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Manrope:wght@400;500;700;800&display=swap');
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -431,7 +432,6 @@ router.get("/stream-page/:id", async (req, res) => {
   <div class="watermark">
     <a href="https://t.me/takezo_5" target="_blank" rel="noopener noreferrer">tak<span>ezo_5</span></a>
   </div>
-  <script src="https://cdn.plyr.io/3.7.8/plyr.polyfilled.js"></script>
 </body>
 </html>`;
 
