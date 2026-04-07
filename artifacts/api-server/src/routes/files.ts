@@ -90,88 +90,23 @@ router.get("/stream-page/:id", async (req, res) => {
             <source src="${videoStreamUrl}" type="video/mp4">
           </video>
         </div>
-        <div id="load-status">
-          <div class="load-bar-bg">
-            <div class="load-bar-fill" id="load-bar-fill"></div>
-          </div>
-          <div id="load-msg" class="load-msg">Loading…</div>
-        </div>
         <div id="enjoy-banner" style="display:none;">
-          <span class="enjoy-enjoy">Enjoy </span><span class="enjoy-video">the Video</span>
+          <span class="enjoy-enjoy">Enjoy </span><span class="enjoy-video">the Content</span>
         </div>
         <script>
           (function(){
             var v      = document.getElementById('player');
-            var status = document.getElementById('load-status');
-            var fill   = document.getElementById('load-bar-fill');
-            var msg    = document.getElementById('load-msg');
             var banner = document.getElementById('enjoy-banner');
             var played = false;
-            var current = 0;
-            var animFrame;
 
-            // Ease-out curve: moves fast at first, slows near the cap
-            // cap keeps rising every second so the bar never fully stops
-            var cap = 5;
-            var capTimer = setInterval(function(){
-              cap = Math.min(88, cap + (cap < 30 ? 4 : cap < 60 ? 2 : 0.5));
-            }, 1000);
-
-            function animate(){
-              if(played) return;
-              // Creep toward cap
-              current += (cap - current) * 0.04;
-              current = Math.min(current, cap);
-              fill.style.width = current.toFixed(1) + '%';
-              var rounded = Math.floor(current);
-              if(rounded < 30)      msg.textContent = 'Downloading… ' + rounded + '%';
-              else if(rounded < 70) msg.textContent = 'Processing video… ' + rounded + '%';
-              else                  msg.textContent = 'Almost ready… ' + rounded + '%';
-              animFrame = requestAnimationFrame(animate);
-            }
-            animFrame = requestAnimationFrame(animate);
-
-            // If real buffered data arrives, use it (takes over from fake animation)
-            v.addEventListener('progress', function(){
-              if(played || !v.duration) return;
-              try {
-                var buf = v.buffered.length ? v.buffered.end(v.buffered.length - 1) : 0;
-                var real = Math.min(88, Math.round((buf / v.duration) * 100));
-                if(real > current) { current = real; cap = Math.max(cap, real); }
-              } catch(e){}
-            });
-
-            function finish(){
+            v.addEventListener('playing', function(){
               if(played) return;
               played = true;
-              clearInterval(capTimer);
-              cancelAnimationFrame(animFrame);
-              fill.style.transition = 'width .3s ease';
-              fill.style.width = '100%';
-              msg.textContent = 'Ready!';
+              banner.style.display = 'flex';
               setTimeout(function(){
-                status.style.display = 'none';
-                banner.style.display = 'flex';
-                setTimeout(function(){
-                  banner.style.opacity = '0';
-                  setTimeout(function(){ banner.style.display = 'none'; }, 600);
-                }, 2000);
-              }, 300);
-            }
-
-            v.addEventListener('playing', finish);
-            v.addEventListener('canplay', function(){
-              // Bump cap so bar visibly jumps forward when browser signals ready
-              cap = Math.max(cap, 80);
-            });
-
-            v.addEventListener('error', function(){
-              clearInterval(capTimer);
-              cancelAnimationFrame(animFrame);
-              msg.textContent = 'Failed to load. Try downloading instead.';
-              msg.style.color = '#ff6b6b';
-              fill.style.background = '#ff6b6b';
-              fill.style.boxShadow = 'none';
+                banner.style.opacity = '0';
+                setTimeout(function(){ banner.style.display = 'none'; }, 600);
+              }, 2000);
             });
           })();
         </script>`;
@@ -271,32 +206,31 @@ router.get("/stream-page/:id", async (req, res) => {
     }
     .tag.hot { color: #001406; background: linear-gradient(135deg, var(--neon), var(--neon-2)); border-color: transparent; }
     .media-container { margin: 22px 0; border-radius: 22px; overflow: hidden; border: 1px solid rgba(0,255,106,.14); background: #000; position: relative; }
-    #load-status {
-      margin: 12px 0 4px;
-      display: flex; flex-direction: column; gap: 8px;
-    }
-    .load-bar-bg {
-      width: 100%; height: 5px; background: rgba(0,255,106,.12);
-      border-radius: 99px; overflow: hidden;
-    }
-    .load-bar-fill {
-      height: 100%; width: 0%;
-      background: linear-gradient(90deg, var(--neon), var(--neon-2));
-      box-shadow: 0 0 10px rgba(0,255,106,.55);
-      border-radius: 99px;
-      transition: width .4s ease;
-    }
-    .load-msg {
-      font-family: 'Manrope',sans-serif; font-weight: 600;
-      font-size: .8rem; color: var(--muted); letter-spacing: .4px;
-    }
     #enjoy-banner {
-      padding: 18px 0 6px; display: flex; align-items: center; justify-content: center;
+      padding: 14px 0 4px; display: flex; align-items: center; justify-content: center;
       font-family: 'Manrope',sans-serif; font-size: 1.5rem; letter-spacing: .4px;
       transition: opacity .6s ease;
     }
     .enjoy-enjoy { color: #fff; font-weight: 700; }
     .enjoy-video { color: var(--neon); font-weight: 800; }
+    .bot-cta {
+      display: flex; align-items: center; gap: 10px;
+      margin-top: 22px; padding: 14px 20px;
+      background: rgba(0,255,106,.06);
+      border: 1px solid rgba(0,255,106,.22);
+      border-radius: 14px;
+      text-decoration: none;
+      color: var(--muted);
+      font-family: 'Manrope',sans-serif; font-size: .88rem; font-weight: 600;
+      letter-spacing: .3px;
+      transition: background .2s, border-color .2s, color .2s;
+    }
+    .bot-cta:hover {
+      background: rgba(0,255,106,.13);
+      border-color: var(--neon);
+      color: #fff;
+    }
+    .bot-cta-icon { font-size: 1.2rem; flex-shrink: 0; }
     video, audio { width: 100%; display: block; }
     .audio-container { padding: 28px; display: grid; place-items: center; gap: 18px; background: linear-gradient(180deg, rgba(2,8,3,.95), rgba(0,0,0,.95)); }
     .audio-icon { font-size: 3.6rem; filter: drop-shadow(0 0 18px var(--glow)); }
@@ -359,6 +293,10 @@ router.get("/stream-page/:id", async (req, res) => {
     <div class="actions">
       <a class="btn btn-primary" href="${downloadUrl}" download="${escHtml(fileLabel)}">⬇️ Download</a>
     </div>
+    <a class="bot-cta" href="https://t.me/filetolink_05bot" target="_blank" rel="noopener noreferrer">
+      <span class="bot-cta-icon">⚡</span>
+      <span>Convert Telegram files into instant download &amp; streaming links</span>
+    </a>
   </div>
   <div class="watermark">
     <a href="https://t.me/takezo_5" target="_blank" rel="noopener noreferrer">tak<span>ezo_5</span></a>
