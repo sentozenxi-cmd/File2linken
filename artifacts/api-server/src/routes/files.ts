@@ -85,25 +85,60 @@ router.get("/stream-page/:id", async (req, res) => {
     let mediaPlayer = "";
     if (isVideo) {
       mediaPlayer = `
-        <div class="media-container">
+        <div class="media-container" style="position:relative;">
           <video id="player" controls preload="auto" controlsList="nodownload" style="width:100%;display:block;">
             <source src="${videoStreamUrl}" type="video/mp4">
           </video>
+          <div id="sub-overlay"></div>
         </div>
         <div id="enjoy-banner" style="display:none;">
           <span class="enjoy-enjoy">Enjoy </span><span class="enjoy-video">the Content</span>
         </div>
+
+        <!-- Subtitle bar -->
         <div class="sub-bar">
           <input type="file" id="sub-input" accept=".srt,.vtt" style="display:none;">
-          <button class="sub-btn" id="sub-btn" onclick="document.getElementById('sub-input').click()">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M7 12h2m4 0h4M7 16h4m4 0h2"/><path d="M16 2l-4 5-4-5"/></svg>
+          <button class="sub-btn" id="sub-btn">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M7 12h2m4 0h4M7 16h4m4 0h2"/></svg>
             Add Subtitles
           </button>
           <span class="sub-active" id="sub-active" style="display:none;">
             <span id="sub-name"></span>
-            <button class="sub-remove" id="sub-remove" title="Remove subtitles">✕</button>
+            <button class="sub-remove" id="sub-remove" title="Remove">✕</button>
           </span>
         </div>
+
+        <!-- Subtitle style controls (hidden until subtitles loaded) -->
+        <div class="sub-controls" id="sub-controls" style="display:none;">
+          <div class="sub-ctrl-row">
+            <span class="sub-ctrl-label">Size</span>
+            <div class="sub-ctrl-group">
+              <button class="sub-opt" data-ctrl="size" data-val="14">S</button>
+              <button class="sub-opt active" data-ctrl="size" data-val="20">M</button>
+              <button class="sub-opt" data-ctrl="size" data-val="28">L</button>
+              <button class="sub-opt" data-ctrl="size" data-val="36">XL</button>
+            </div>
+          </div>
+          <div class="sub-ctrl-row">
+            <span class="sub-ctrl-label">Colour</span>
+            <div class="sub-ctrl-group">
+              <button class="sub-swatch active" data-ctrl="color" data-val="#ffffff" style="background:#ffffff;" title="White"></button>
+              <button class="sub-swatch" data-ctrl="color" data-val="#ffff00" style="background:#ffff00;" title="Yellow"></button>
+              <button class="sub-swatch" data-ctrl="color" data-val="#00ff6a" style="background:#00ff6a;" title="Green"></button>
+              <button class="sub-swatch" data-ctrl="color" data-val="#00eaff" style="background:#00eaff;" title="Cyan"></button>
+              <button class="sub-swatch" data-ctrl="color" data-val="#ff6b6b" style="background:#ff6b6b;" title="Red"></button>
+            </div>
+          </div>
+          <div class="sub-ctrl-row">
+            <span class="sub-ctrl-label">Font</span>
+            <div class="sub-ctrl-group">
+              <button class="sub-opt active" data-ctrl="font" data-val="'Manrope',sans-serif" style="font-family:'Manrope',sans-serif;">Modern</button>
+              <button class="sub-opt" data-ctrl="font" data-val="Georgia,serif" style="font-family:Georgia,serif;">Serif</button>
+              <button class="sub-opt" data-ctrl="font" data-val="'Courier New',monospace" style="font-family:'Courier New',monospace;">Mono</button>
+            </div>
+          </div>
+        </div>
+
         <script>
           (function(){
             var v      = document.getElementById('player');
@@ -120,49 +155,87 @@ router.get("/stream-page/:id", async (req, res) => {
               }, 2000);
             });
 
-            // ── Subtitle handling ──────────────────────────────────
+            // ── Subtitle engine ────────────────────────────────────
+            var overlay   = document.getElementById('sub-overlay');
             var subInput  = document.getElementById('sub-input');
             var subBtn    = document.getElementById('sub-btn');
             var subActive = document.getElementById('sub-active');
             var subName   = document.getElementById('sub-name');
             var subRemove = document.getElementById('sub-remove');
-            var blobUrl   = null;
-            var trackEl   = null;
+            var subCtrl   = document.getElementById('sub-controls');
 
-            function srtToVtt(srt){
-              return 'WEBVTT\\n\\n' + srt
-                .replace(/\\r\\n/g,'\\n').replace(/\\r/g,'\\n')
-                .replace(/(\\d{2}:\\d{2}:\\d{2}),(\\d{3})/g,'$1.$2')
-                .trim();
+            var cues = [];       // [{start, end, html}]
+            var raf  = null;
+            var style = { size: 20, color: '#ffffff', font: "'Manrope',sans-serif" };
+
+            // Parse timestamps "HH:MM:SS,mmm" or "HH:MM:SS.mmm" → seconds
+            function ts(s){
+              var p = s.replace(',','.').split(':');
+              return parseFloat(p[0])*3600 + parseFloat(p[1])*60 + parseFloat(p[2]);
             }
 
-            function loadTrack(vttText, name){
-              // Remove existing track
-              clearTrack();
-              var blob = new Blob([vttText], {type:'text/vtt'});
-              blobUrl = URL.createObjectURL(blob);
-              trackEl = document.createElement('track');
-              trackEl.kind    = 'subtitles';
-              trackEl.label   = name;
-              trackEl.srclang = 'en';
-              trackEl.src     = blobUrl;
-              trackEl.default = true;
-              v.appendChild(trackEl);
-              // Force enable after load
-              trackEl.addEventListener('load', function(){
-                if(v.textTracks[0]) v.textTracks[0].mode = 'showing';
+            function parseSRT(text){
+              var result = [];
+              var blocks = text.replace(/\\r\\n/g,'\\n').replace(/\\r/g,'\\n').trim().split(/\\n\\s*\\n/);
+              blocks.forEach(function(block){
+                var lines = block.trim().split('\\n');
+                // Skip sequence number line if it's a digit
+                var i = 0;
+                if(/^\\d+$/.test(lines[i].trim())) i++;
+                var arrow = lines[i] && lines[i].indexOf('-->') !== -1 ? lines[i] : null;
+                if(!arrow) return;
+                var times = arrow.split('-->');
+                var start = ts(times[0].trim());
+                var end   = ts(times[1].trim().split(' ')[0]);
+                var html  = lines.slice(i+1).join('<br>').trim();
+                if(html) result.push({start:start, end:end, html:html});
               });
-              subName.textContent = name;
+              return result;
+            }
+
+            function parseVTT(text){
+              // Strip WEBVTT header then treat like SRT blocks
+              var body = text.replace(/^WEBVTT[^\\n]*\\n/, '').replace(/NOTE[^\\n]*\\n[\\s\\S]*?(?=\\n\\n|$)/g,'');
+              return parseSRT(body);
+            }
+
+            function applyStyle(){
+              overlay.style.fontSize  = style.size + 'px';
+              overlay.style.color     = style.color;
+              overlay.style.fontFamily= style.font;
+            }
+
+            function tick(){
+              var t = v.currentTime;
+              var active = '';
+              for(var i=0;i<cues.length;i++){
+                if(t >= cues[i].start && t < cues[i].end){ active = cues[i].html; break; }
+              }
+              overlay.innerHTML = active;
+              raf = requestAnimationFrame(tick);
+            }
+
+            function loadSubs(text, name, isVtt){
+              cues = isVtt ? parseVTT(text) : parseSRT(text);
+              applyStyle();
+              if(raf) cancelAnimationFrame(raf);
+              raf = requestAnimationFrame(tick);
+              subName.textContent     = name;
               subBtn.style.display    = 'none';
               subActive.style.display = 'flex';
+              subCtrl.style.display   = 'flex';
             }
 
-            function clearTrack(){
-              if(trackEl){ v.removeChild(trackEl); trackEl = null; }
-              if(blobUrl){ URL.revokeObjectURL(blobUrl); blobUrl = null; }
-              // Hide all text tracks
-              for(var i=0;i<v.textTracks.length;i++) v.textTracks[i].mode='disabled';
+            function clearSubs(){
+              cues = [];
+              if(raf){ cancelAnimationFrame(raf); raf = null; }
+              overlay.innerHTML       = '';
+              subActive.style.display = 'none';
+              subCtrl.style.display   = 'none';
+              subBtn.style.display    = 'flex';
             }
+
+            subBtn.addEventListener('click', function(){ subInput.click(); });
 
             subInput.addEventListener('change', function(){
               var file = subInput.files[0];
@@ -170,17 +243,27 @@ router.get("/stream-page/:id", async (req, res) => {
               var reader = new FileReader();
               reader.onload = function(e){
                 var text = e.target.result;
-                var vtt  = file.name.endsWith('.vtt') ? text : srtToVtt(text);
-                loadTrack(vtt, file.name);
+                var isVtt = file.name.toLowerCase().endsWith('.vtt');
+                loadSubs(text, file.name, isVtt);
               };
-              reader.readAsText(file);
+              reader.readAsText(file, 'UTF-8');
               subInput.value = '';
             });
 
-            subRemove.addEventListener('click', function(){
-              clearTrack();
-              subActive.style.display = 'none';
-              subBtn.style.display    = 'flex';
+            subRemove.addEventListener('click', clearSubs);
+
+            // ── Style controls ─────────────────────────────────────
+            document.querySelectorAll('[data-ctrl]').forEach(function(btn){
+              btn.addEventListener('click', function(){
+                var ctrl = btn.dataset.ctrl;
+                var val  = btn.dataset.val;
+                style[ctrl === 'size' ? 'size' : ctrl === 'color' ? 'color' : 'font'] =
+                  ctrl === 'size' ? parseInt(val) : val;
+                // Update active state within group
+                document.querySelectorAll('[data-ctrl="'+ctrl+'"]').forEach(function(b){ b.classList.remove('active'); });
+                btn.classList.add('active');
+                applyStyle();
+              });
             });
           })();
         </script>`;
@@ -305,9 +388,21 @@ router.get("/stream-page/:id", async (req, res) => {
       color: #fff;
     }
     .bot-cta-icon { font-size: 1.2rem; flex-shrink: 0; }
+    /* Subtitle overlay — sits on top of the video */
+    #sub-overlay {
+      position: absolute; bottom: 44px; left: 0; right: 0;
+      text-align: center; pointer-events: none;
+      font-size: 20px; color: #fff; font-family: 'Manrope',sans-serif;
+      font-weight: 700; line-height: 1.4;
+      text-shadow: 0 1px 4px #000, 0 0 8px #000;
+      padding: 0 12px;
+      z-index: 5;
+      transition: font-size .2s, color .2s, font-family .2s;
+    }
+    /* Sub toolbar */
     .sub-bar {
       display: flex; align-items: center; gap: 10px;
-      margin: -8px 0 16px;
+      margin: -8px 0 10px;
     }
     .sub-btn {
       display: flex; align-items: center; gap: 6px;
@@ -329,16 +424,44 @@ router.get("/stream-page/:id", async (req, res) => {
       border-radius: 999px;
       font-family: 'Manrope',sans-serif; font-size: .78rem; font-weight: 600;
       color: var(--neon);
-      max-width: 260px;
+      max-width: 240px;
     }
     #sub-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .sub-remove {
       background: none; border: none; cursor: pointer;
       color: var(--muted); font-size: .75rem; padding: 0; line-height: 1;
-      flex-shrink: 0;
-      transition: color .15s;
+      flex-shrink: 0; transition: color .15s;
     }
     .sub-remove:hover { color: #ff6b6b; }
+    /* Style controls panel */
+    .sub-controls {
+      flex-direction: column; gap: 10px;
+      padding: 14px 16px;
+      background: rgba(0,255,106,.04);
+      border: 1px solid rgba(0,255,106,.14);
+      border-radius: 14px;
+      margin-bottom: 16px;
+    }
+    .sub-ctrl-row { display: flex; align-items: center; gap: 12px; }
+    .sub-ctrl-label {
+      font-family: 'Manrope',sans-serif; font-size: .74rem; font-weight: 700;
+      color: var(--muted); letter-spacing: .5px; width: 46px; flex-shrink: 0;
+    }
+    .sub-ctrl-group { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+    .sub-opt {
+      padding: 4px 11px; border-radius: 999px; cursor: pointer;
+      background: transparent; border: 1px solid rgba(255,255,255,.12);
+      color: var(--muted); font-family: 'Manrope',sans-serif;
+      font-size: .75rem; font-weight: 700; transition: all .15s;
+    }
+    .sub-opt:hover { border-color: var(--neon); color: var(--neon); }
+    .sub-opt.active { background: var(--neon); color: #001406; border-color: var(--neon); }
+    .sub-swatch {
+      width: 22px; height: 22px; border-radius: 50%; cursor: pointer;
+      border: 2px solid transparent; transition: transform .15s, border-color .15s;
+    }
+    .sub-swatch:hover { transform: scale(1.15); }
+    .sub-swatch.active { border-color: #fff; transform: scale(1.18); }
     .bot-cta-btn {
       flex-shrink: 0;
       padding: 5px 13px;
