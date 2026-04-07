@@ -82,72 +82,39 @@ router.get("/stream-page/:id", async (req, res) => {
     const isAudio = file.isAudio || file.mimeType?.startsWith("audio/") || file.fileType === "audio" || file.fileType === "voice";
     const isImage = file.mimeType?.startsWith("image/") || file.fileType === "photo" || file.fileType === "sticker";
 
+    const subSearchUrl = `https://www.opensubtitles.com/en/search-all/q-${encodeURIComponent(fileLabel || "")}`;
     let mediaPlayer = "";
     if (isVideo) {
       mediaPlayer = `
-        <div class="media-container" style="position:relative;">
-          <video id="player" controls preload="auto" controlsList="nodownload" style="width:100%;display:block;">
+        <div class="media-container">
+          <video id="player" playsinline>
             <source src="${videoStreamUrl}" type="video/mp4">
+            <track id="sub-track" kind="subtitles" label="Subtitles" srclang="en">
           </video>
-          <div id="sub-overlay"></div>
         </div>
         <div id="enjoy-banner" style="display:none;">
           <span class="enjoy-enjoy">Enjoy </span><span class="enjoy-video">the Content</span>
         </div>
-
-        <!-- Subtitle bar -->
-        <div class="sub-bar">
-          <input type="file" id="sub-input" accept=".srt,.vtt" style="display:none;">
-          <button class="sub-btn" id="sub-btn">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M7 12h2m4 0h4M7 16h4m4 0h2"/></svg>
-            Add Subtitles
-          </button>
-          <span class="sub-active" id="sub-active" style="display:none;">
-            <span id="sub-name"></span>
-            <button class="sub-remove" id="sub-remove" title="Remove">✕</button>
-          </span>
+        <div class="sub-row">
+          <input type="file" id="sub-file" accept=".srt,.vtt" style="display:none;">
+          <span class="sub-hint" id="sub-hint">No subtitles</span>
+          <button class="sub-load-btn" id="sub-load-btn">📂 Load from disk</button>
+          <button class="sub-clear-btn" id="sub-clear-btn" style="display:none;">✕ Clear</button>
+          <a class="sub-search-link" href="${subSearchUrl}" target="_blank" rel="noopener">🔍 Find online</a>
         </div>
-
-        <!-- Subtitle style controls (hidden until subtitles loaded) -->
-        <div class="sub-controls" id="sub-controls" style="display:none;">
-          <div class="sub-ctrl-row">
-            <span class="sub-ctrl-label">Size</span>
-            <div class="sub-ctrl-group">
-              <button class="sub-opt" data-ctrl="size" data-val="14">S</button>
-              <button class="sub-opt active" data-ctrl="size" data-val="20">M</button>
-              <button class="sub-opt" data-ctrl="size" data-val="28">L</button>
-              <button class="sub-opt" data-ctrl="size" data-val="36">XL</button>
-            </div>
-          </div>
-          <div class="sub-ctrl-row">
-            <span class="sub-ctrl-label">Colour</span>
-            <div class="sub-ctrl-group">
-              <button class="sub-swatch active" data-ctrl="color" data-val="#ffffff" style="background:#ffffff;" title="White"></button>
-              <button class="sub-swatch" data-ctrl="color" data-val="#ffff00" style="background:#ffff00;" title="Yellow"></button>
-              <button class="sub-swatch" data-ctrl="color" data-val="#00ff6a" style="background:#00ff6a;" title="Green"></button>
-              <button class="sub-swatch" data-ctrl="color" data-val="#00eaff" style="background:#00eaff;" title="Cyan"></button>
-              <button class="sub-swatch" data-ctrl="color" data-val="#ff6b6b" style="background:#ff6b6b;" title="Red"></button>
-            </div>
-          </div>
-          <div class="sub-ctrl-row">
-            <span class="sub-ctrl-label">Font</span>
-            <div class="sub-ctrl-group">
-              <button class="sub-opt active" data-ctrl="font" data-val="'Manrope',sans-serif" style="font-family:'Manrope',sans-serif;">Modern</button>
-              <button class="sub-opt" data-ctrl="font" data-val="Georgia,serif" style="font-family:Georgia,serif;">Serif</button>
-              <button class="sub-opt" data-ctrl="font" data-val="'Courier New',monospace" style="font-family:'Courier New',monospace;">Mono</button>
-            </div>
-          </div>
-        </div>
-
         <script>
           (function(){
-            var v      = document.getElementById('player');
+            var plyr = new Plyr('#player', {
+              captions: { active: false, language: 'en', update: true },
+              settings: ['captions', 'speed'],
+              speed: { selected: 1, options: [0.5, 0.75, 1, 1.25, 1.5, 2] },
+              keyboard: { focused: true, global: true },
+            });
+
             var banner = document.getElementById('enjoy-banner');
             var played = false;
-
-            v.addEventListener('playing', function(){
-              if(played) return;
-              played = true;
+            plyr.on('playing', function(){
+              if(played) return; played = true;
               banner.style.display = 'flex';
               setTimeout(function(){
                 banner.style.opacity = '0';
@@ -155,127 +122,77 @@ router.get("/stream-page/:id", async (req, res) => {
               }, 2000);
             });
 
-            // ── Subtitle engine ────────────────────────────────────
-            var overlay   = document.getElementById('sub-overlay');
-            var subInput  = document.getElementById('sub-input');
-            var subBtn    = document.getElementById('sub-btn');
-            var subActive = document.getElementById('sub-active');
-            var subName   = document.getElementById('sub-name');
-            var subRemove = document.getElementById('sub-remove');
-            var subCtrl   = document.getElementById('sub-controls');
+            // ── Subtitle loader ────────────────────────────────────
+            var subFile  = document.getElementById('sub-file');
+            var loadBtn  = document.getElementById('sub-load-btn');
+            var clearBtn = document.getElementById('sub-clear-btn');
+            var hint     = document.getElementById('sub-hint');
+            var track    = document.getElementById('sub-track');
+            var blobUrl  = null;
 
-            var cues = [];       // [{start, end, html}]
-            var raf  = null;
-            var style = { size: 20, color: '#ffffff', font: "'Manrope',sans-serif" };
-
-            // Parse timestamps "HH:MM:SS,mmm" or "HH:MM:SS.mmm" → seconds
-            function ts(s){
-              var p = s.replace(',','.').split(':');
-              return parseFloat(p[0])*3600 + parseFloat(p[1])*60 + parseFloat(p[2]);
+            function srtToVtt(srt){
+              return 'WEBVTT\\n\\n' + srt
+                .replace(/\\r\\n/g,'\\n').replace(/\\r/g,'\\n')
+                .replace(/(\\d{2}:\\d{2}:\\d{2}),(\\d{3})/g,'$1.$2')
+                .trim();
             }
 
-            function parseSRT(text){
-              var result = [];
-              var blocks = text.replace(/\\r\\n/g,'\\n').replace(/\\r/g,'\\n').trim().split(/\\n\\s*\\n/);
-              blocks.forEach(function(block){
-                var lines = block.trim().split('\\n');
-                // Skip sequence number line if it's a digit
-                var i = 0;
-                if(/^\\d+$/.test(lines[i].trim())) i++;
-                var arrow = lines[i] && lines[i].indexOf('-->') !== -1 ? lines[i] : null;
-                if(!arrow) return;
-                var times = arrow.split('-->');
-                var start = ts(times[0].trim());
-                var end   = ts(times[1].trim().split(' ')[0]);
-                var html  = lines.slice(i+1).join('<br>').trim();
-                if(html) result.push({start:start, end:end, html:html});
-              });
-              return result;
-            }
+            loadBtn.addEventListener('click', function(){ subFile.click(); });
 
-            function parseVTT(text){
-              // Strip WEBVTT header then treat like SRT blocks
-              var body = text.replace(/^WEBVTT[^\\n]*\\n/, '').replace(/NOTE[^\\n]*\\n[\\s\\S]*?(?=\\n\\n|$)/g,'');
-              return parseSRT(body);
-            }
-
-            function applyStyle(){
-              overlay.style.fontSize  = style.size + 'px';
-              overlay.style.color     = style.color;
-              overlay.style.fontFamily= style.font;
-            }
-
-            function tick(){
-              var t = v.currentTime;
-              var active = '';
-              for(var i=0;i<cues.length;i++){
-                if(t >= cues[i].start && t < cues[i].end){ active = cues[i].html; break; }
-              }
-              overlay.innerHTML = active;
-              raf = requestAnimationFrame(tick);
-            }
-
-            function loadSubs(text, name, isVtt){
-              cues = isVtt ? parseVTT(text) : parseSRT(text);
-              applyStyle();
-              if(raf) cancelAnimationFrame(raf);
-              raf = requestAnimationFrame(tick);
-              subName.textContent     = name;
-              subBtn.style.display    = 'none';
-              subActive.style.display = 'flex';
-              subCtrl.style.display   = 'flex';
-            }
-
-            function clearSubs(){
-              cues = [];
-              if(raf){ cancelAnimationFrame(raf); raf = null; }
-              overlay.innerHTML       = '';
-              subActive.style.display = 'none';
-              subCtrl.style.display   = 'none';
-              subBtn.style.display    = 'flex';
-            }
-
-            subBtn.addEventListener('click', function(){ subInput.click(); });
-
-            subInput.addEventListener('change', function(){
-              var file = subInput.files[0];
-              if(!file) return;
+            subFile.addEventListener('change', function(){
+              var f = this.files[0];
+              if(!f) return;
               var reader = new FileReader();
               reader.onload = function(e){
                 var text = e.target.result;
-                var isVtt = file.name.toLowerCase().endsWith('.vtt');
-                loadSubs(text, file.name, isVtt);
+                if(!f.name.toLowerCase().endsWith('.vtt')) text = srtToVtt(text);
+                if(blobUrl) URL.revokeObjectURL(blobUrl);
+                blobUrl = URL.createObjectURL(new Blob([text], {type:'text/vtt'}));
+                track.src = blobUrl;
+                // Give browser a tick then enable the track
+                setTimeout(function(){
+                  var tracks = plyr.media.textTracks;
+                  for(var i=0;i<tracks.length;i++) tracks[i].mode = 'showing';
+                  plyr.currentTrack = 0;
+                }, 150);
+                hint.textContent = f.name;
+                hint.style.color = 'var(--neon)';
+                loadBtn.style.display  = 'none';
+                clearBtn.style.display = 'inline-flex';
               };
-              reader.readAsText(file, 'UTF-8');
-              subInput.value = '';
+              reader.readAsText(f, 'UTF-8');
+              this.value = '';
             });
 
-            subRemove.addEventListener('click', clearSubs);
-
-            // ── Style controls ─────────────────────────────────────
-            document.querySelectorAll('[data-ctrl]').forEach(function(btn){
-              btn.addEventListener('click', function(){
-                var ctrl = btn.dataset.ctrl;
-                var val  = btn.dataset.val;
-                style[ctrl === 'size' ? 'size' : ctrl === 'color' ? 'color' : 'font'] =
-                  ctrl === 'size' ? parseInt(val) : val;
-                // Update active state within group
-                document.querySelectorAll('[data-ctrl="'+ctrl+'"]').forEach(function(b){ b.classList.remove('active'); });
-                btn.classList.add('active');
-                applyStyle();
-              });
+            clearBtn.addEventListener('click', function(){
+              if(blobUrl){ URL.revokeObjectURL(blobUrl); blobUrl = null; }
+              track.src = '';
+              var tracks = plyr.media.textTracks;
+              for(var i=0;i<tracks.length;i++) tracks[i].mode = 'disabled';
+              plyr.currentTrack = -1;
+              hint.textContent = 'No subtitles';
+              hint.style.color = '';
+              clearBtn.style.display = 'none';
+              loadBtn.style.display  = 'inline-flex';
             });
           })();
         </script>`;
     } else if (isAudio) {
-      mediaPlayer = `
-        <div class="media-container audio-container">
-          <div class="audio-icon">🎵</div>
-          <audio id="player" controls preload="metadata">
-            <source src="${streamUrl}" type="${file.mimeType || "audio/mpeg"}">
-            Your browser does not support audio playback.
-          </audio>
-        </div>`;
+      const unsupportedAudio = ["audio/ac3", "audio/eac3", "audio/x-ac3", "audio/truehd", "audio/dts", "audio/x-dts"];
+      const canPlayInBrowser = !unsupportedAudio.includes(file.mimeType || "");
+      mediaPlayer = canPlayInBrowser
+        ? `<div class="media-container audio-container">
+            <div class="audio-icon">🎵</div>
+            <audio id="player" controls preload="metadata" style="width:100%;">
+              <source src="${streamUrl}" type="${file.mimeType || "audio/mpeg"}">
+              Your browser does not support audio playback.
+            </audio>
+          </div>`
+        : `<div class="media-container no-preview">
+            <div class="no-preview-icon">🔊</div>
+            <p style="color:var(--muted);font-size:.9rem;margin-bottom:6px;">This audio format (<code>${escHtml(file.mimeType || "unknown")}</code>) cannot play directly in the browser.</p>
+            <p style="color:var(--muted);font-size:.85rem;">Use the Download button below to play it in a media player like VLC.</p>
+          </div>`;
     } else if (isImage) {
       mediaPlayer = `
         <div class="media-container image-container">
@@ -296,6 +213,7 @@ router.get("/stream-page/:id", async (req, res) => {
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>${escHtml(fileLabel)} — File2Link BOT</title>
+  <link rel="stylesheet" href="https://cdn.plyr.io/3.7.8/plyr.css">
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Manrope:wght@400;500;700;800&display=swap');
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -388,80 +306,51 @@ router.get("/stream-page/:id", async (req, res) => {
       color: #fff;
     }
     .bot-cta-icon { font-size: 1.2rem; flex-shrink: 0; }
-    /* Subtitle overlay — sits on top of the video */
-    #sub-overlay {
-      position: absolute; bottom: 44px; left: 0; right: 0;
-      text-align: center; pointer-events: none;
-      font-size: 20px; color: #fff; font-family: 'Manrope',sans-serif;
-      font-weight: 700; line-height: 1.4;
-      text-shadow: 0 1px 4px #000, 0 0 8px #000;
-      padding: 0 12px;
-      z-index: 5;
-      transition: font-size .2s, color .2s, font-family .2s;
+    /* Plyr theme overrides */
+    :root {
+      --plyr-color-main: #00ff6a;
+      --plyr-video-background: #000;
+      --plyr-range-fill-background: #00ff6a;
+      --plyr-video-control-color: #fff;
+      --plyr-video-control-color-hover: #001406;
+      --plyr-video-control-background-hover: #00ff6a;
+      --plyr-menu-background: rgba(8,16,10,.97);
+      --plyr-menu-color: #effff3;
+      --plyr-menu-border-color: rgba(0,255,106,.2);
     }
-    /* Sub toolbar */
-    .sub-bar {
-      display: flex; align-items: center; gap: 10px;
-      margin: -8px 0 10px;
+    .plyr--video { border-radius: 20px; overflow: hidden; }
+    .plyr__captions { font-family: 'Manrope',sans-serif; font-weight: 700; }
+    /* Subtitle row */
+    .sub-row {
+      display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+      margin: 6px 0 16px;
     }
-    .sub-btn {
-      display: flex; align-items: center; gap: 6px;
-      padding: 6px 14px;
-      background: transparent;
-      border: 1px solid rgba(0,255,106,.3);
-      border-radius: 999px;
-      color: var(--muted);
+    .sub-hint {
       font-family: 'Manrope',sans-serif; font-size: .78rem; font-weight: 600;
-      cursor: pointer; letter-spacing: .3px;
-      transition: border-color .2s, color .2s, background .2s;
+      color: var(--muted); flex: 1; min-width: 0;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      transition: color .2s;
     }
-    .sub-btn:hover { border-color: var(--neon); color: var(--neon); background: rgba(0,255,106,.06); }
-    .sub-active {
-      display: flex; align-items: center; gap: 8px;
-      padding: 5px 12px;
-      background: rgba(0,255,106,.1);
-      border: 1px solid rgba(0,255,106,.35);
-      border-radius: 999px;
-      font-family: 'Manrope',sans-serif; font-size: .78rem; font-weight: 600;
-      color: var(--neon);
-      max-width: 240px;
+    .sub-load-btn, .sub-clear-btn {
+      display: inline-flex; align-items: center; gap: 5px;
+      padding: 5px 13px; border-radius: 999px; cursor: pointer;
+      font-family: 'Manrope',sans-serif; font-size: .76rem; font-weight: 700;
+      transition: all .15s; white-space: nowrap;
     }
-    #sub-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .sub-remove {
-      background: none; border: none; cursor: pointer;
-      color: var(--muted); font-size: .75rem; padding: 0; line-height: 1;
-      flex-shrink: 0; transition: color .15s;
+    .sub-load-btn {
+      background: transparent; border: 1px solid rgba(0,255,106,.3); color: var(--muted);
     }
-    .sub-remove:hover { color: #ff6b6b; }
-    /* Style controls panel */
-    .sub-controls {
-      flex-direction: column; gap: 10px;
-      padding: 14px 16px;
-      background: rgba(0,255,106,.04);
-      border: 1px solid rgba(0,255,106,.14);
-      border-radius: 14px;
-      margin-bottom: 16px;
+    .sub-load-btn:hover { border-color: var(--neon); color: var(--neon); background: rgba(0,255,106,.06); }
+    .sub-clear-btn {
+      background: rgba(255,107,107,.1); border: 1px solid rgba(255,107,107,.3); color: #ff6b6b;
     }
-    .sub-ctrl-row { display: flex; align-items: center; gap: 12px; }
-    .sub-ctrl-label {
-      font-family: 'Manrope',sans-serif; font-size: .74rem; font-weight: 700;
-      color: var(--muted); letter-spacing: .5px; width: 46px; flex-shrink: 0;
+    .sub-clear-btn:hover { background: rgba(255,107,107,.2); border-color: #ff6b6b; }
+    .sub-search-link {
+      font-family: 'Manrope',sans-serif; font-size: .76rem; font-weight: 700;
+      color: var(--muted); text-decoration: none; white-space: nowrap;
+      transition: color .15s;
     }
-    .sub-ctrl-group { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-    .sub-opt {
-      padding: 4px 11px; border-radius: 999px; cursor: pointer;
-      background: transparent; border: 1px solid rgba(255,255,255,.12);
-      color: var(--muted); font-family: 'Manrope',sans-serif;
-      font-size: .75rem; font-weight: 700; transition: all .15s;
-    }
-    .sub-opt:hover { border-color: var(--neon); color: var(--neon); }
-    .sub-opt.active { background: var(--neon); color: #001406; border-color: var(--neon); }
-    .sub-swatch {
-      width: 22px; height: 22px; border-radius: 50%; cursor: pointer;
-      border: 2px solid transparent; transition: transform .15s, border-color .15s;
-    }
-    .sub-swatch:hover { transform: scale(1.15); }
-    .sub-swatch.active { border-color: #fff; transform: scale(1.18); }
+    .sub-search-link:hover { color: var(--neon); }
     .bot-cta-btn {
       flex-shrink: 0;
       padding: 5px 13px;
@@ -542,6 +431,7 @@ router.get("/stream-page/:id", async (req, res) => {
   <div class="watermark">
     <a href="https://t.me/takezo_5" target="_blank" rel="noopener noreferrer">tak<span>ezo_5</span></a>
   </div>
+  <script src="https://cdn.plyr.io/3.7.8/plyr.polyfilled.js"></script>
 </body>
 </html>`;
 

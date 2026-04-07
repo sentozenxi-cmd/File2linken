@@ -25,6 +25,10 @@ async function logToChannel(
   fromMessageId: number,
   logText: string,
 ): Promise<{ logChatId: number; logMessageId: number } | null> {
+  if (!LOG_CHANNEL_ID) {
+    logger.warn("LOG_CHANNEL_ID is not set — skipping log channel forward");
+    return null;
+  }
   try {
     const forwarded = await bot.telegram.forwardMessage(
       LOG_CHANNEL_ID,
@@ -32,9 +36,10 @@ async function logToChannel(
       fromMessageId,
     );
     await bot.telegram.sendMessage(LOG_CHANNEL_ID, logText, { parse_mode: "HTML" });
+    logger.info({ logChatId: forwarded.chat.id, logMessageId: forwarded.message_id }, "Forwarded to log channel");
     return { logChatId: forwarded.chat.id, logMessageId: forwarded.message_id };
-  } catch (err) {
-    logger.warn({ err }, "Failed to log to channel");
+  } catch (err: any) {
+    logger.error({ err: err?.message || err }, "Failed to forward to log channel — check that the bot is an admin in the channel and LOG_CHANNEL_ID is correct");
     return null;
   }
 }
