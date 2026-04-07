@@ -93,6 +93,17 @@ router.get("/stream-page/:id", async (req, res) => {
         <div id="enjoy-banner" style="display:none;">
           <span class="enjoy-enjoy">Enjoy </span><span class="enjoy-video">the Content</span>
         </div>
+        <div class="sub-bar">
+          <input type="file" id="sub-input" accept=".srt,.vtt" style="display:none;">
+          <button class="sub-btn" id="sub-btn" onclick="document.getElementById('sub-input').click()">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M7 12h2m4 0h4M7 16h4m4 0h2"/><path d="M16 2l-4 5-4-5"/></svg>
+            Add Subtitles
+          </button>
+          <span class="sub-active" id="sub-active" style="display:none;">
+            <span id="sub-name"></span>
+            <button class="sub-remove" id="sub-remove" title="Remove subtitles">✕</button>
+          </span>
+        </div>
         <script>
           (function(){
             var v      = document.getElementById('player');
@@ -107,6 +118,69 @@ router.get("/stream-page/:id", async (req, res) => {
                 banner.style.opacity = '0';
                 setTimeout(function(){ banner.style.display = 'none'; }, 600);
               }, 2000);
+            });
+
+            // ── Subtitle handling ──────────────────────────────────
+            var subInput  = document.getElementById('sub-input');
+            var subBtn    = document.getElementById('sub-btn');
+            var subActive = document.getElementById('sub-active');
+            var subName   = document.getElementById('sub-name');
+            var subRemove = document.getElementById('sub-remove');
+            var blobUrl   = null;
+            var trackEl   = null;
+
+            function srtToVtt(srt){
+              return 'WEBVTT\\n\\n' + srt
+                .replace(/\\r\\n/g,'\\n').replace(/\\r/g,'\\n')
+                .replace(/(\\d{2}:\\d{2}:\\d{2}),(\\d{3})/g,'$1.$2')
+                .trim();
+            }
+
+            function loadTrack(vttText, name){
+              // Remove existing track
+              clearTrack();
+              var blob = new Blob([vttText], {type:'text/vtt'});
+              blobUrl = URL.createObjectURL(blob);
+              trackEl = document.createElement('track');
+              trackEl.kind    = 'subtitles';
+              trackEl.label   = name;
+              trackEl.srclang = 'en';
+              trackEl.src     = blobUrl;
+              trackEl.default = true;
+              v.appendChild(trackEl);
+              // Force enable after load
+              trackEl.addEventListener('load', function(){
+                if(v.textTracks[0]) v.textTracks[0].mode = 'showing';
+              });
+              subName.textContent = name;
+              subBtn.style.display    = 'none';
+              subActive.style.display = 'flex';
+            }
+
+            function clearTrack(){
+              if(trackEl){ v.removeChild(trackEl); trackEl = null; }
+              if(blobUrl){ URL.revokeObjectURL(blobUrl); blobUrl = null; }
+              // Hide all text tracks
+              for(var i=0;i<v.textTracks.length;i++) v.textTracks[i].mode='disabled';
+            }
+
+            subInput.addEventListener('change', function(){
+              var file = subInput.files[0];
+              if(!file) return;
+              var reader = new FileReader();
+              reader.onload = function(e){
+                var text = e.target.result;
+                var vtt  = file.name.endsWith('.vtt') ? text : srtToVtt(text);
+                loadTrack(vtt, file.name);
+              };
+              reader.readAsText(file);
+              subInput.value = '';
+            });
+
+            subRemove.addEventListener('click', function(){
+              clearTrack();
+              subActive.style.display = 'none';
+              subBtn.style.display    = 'flex';
             });
           })();
         </script>`;
@@ -231,6 +305,40 @@ router.get("/stream-page/:id", async (req, res) => {
       color: #fff;
     }
     .bot-cta-icon { font-size: 1.2rem; flex-shrink: 0; }
+    .sub-bar {
+      display: flex; align-items: center; gap: 10px;
+      margin: -8px 0 16px;
+    }
+    .sub-btn {
+      display: flex; align-items: center; gap: 6px;
+      padding: 6px 14px;
+      background: transparent;
+      border: 1px solid rgba(0,255,106,.3);
+      border-radius: 999px;
+      color: var(--muted);
+      font-family: 'Manrope',sans-serif; font-size: .78rem; font-weight: 600;
+      cursor: pointer; letter-spacing: .3px;
+      transition: border-color .2s, color .2s, background .2s;
+    }
+    .sub-btn:hover { border-color: var(--neon); color: var(--neon); background: rgba(0,255,106,.06); }
+    .sub-active {
+      display: flex; align-items: center; gap: 8px;
+      padding: 5px 12px;
+      background: rgba(0,255,106,.1);
+      border: 1px solid rgba(0,255,106,.35);
+      border-radius: 999px;
+      font-family: 'Manrope',sans-serif; font-size: .78rem; font-weight: 600;
+      color: var(--neon);
+      max-width: 260px;
+    }
+    #sub-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .sub-remove {
+      background: none; border: none; cursor: pointer;
+      color: var(--muted); font-size: .75rem; padding: 0; line-height: 1;
+      flex-shrink: 0;
+      transition: color .15s;
+    }
+    .sub-remove:hover { color: #ff6b6b; }
     .bot-cta-btn {
       flex-shrink: 0;
       padding: 5px 13px;
