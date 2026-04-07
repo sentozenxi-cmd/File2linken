@@ -231,6 +231,15 @@ router.get("/stream-page/:id", async (req, res) => {
       color: #fff;
     }
     .bot-cta-icon { font-size: 1.2rem; flex-shrink: 0; }
+    .bot-cta-btn {
+      flex-shrink: 0;
+      padding: 5px 13px;
+      background: var(--neon);
+      color: #001406;
+      font-family: 'Manrope',sans-serif; font-weight: 800; font-size: .75rem;
+      border-radius: 999px; letter-spacing: .4px;
+      white-space: nowrap;
+    }
     video, audio { width: 100%; display: block; }
     .audio-container { padding: 28px; display: grid; place-items: center; gap: 18px; background: linear-gradient(180deg, rgba(2,8,3,.95), rgba(0,0,0,.95)); }
     .audio-icon { font-size: 3.6rem; filter: drop-shadow(0 0 18px var(--glow)); }
@@ -295,7 +304,8 @@ router.get("/stream-page/:id", async (req, res) => {
     </div>
     <a class="bot-cta" href="https://t.me/filetolink_05bot" target="_blank" rel="noopener noreferrer">
       <span class="bot-cta-icon">⚡</span>
-      <span>Convert Telegram files into instant download &amp; streaming links</span>
+      <span style="flex:1;">Convert Telegram files into instant download &amp; streaming links</span>
+      <span class="bot-cta-btn">Open Bot</span>
     </a>
   </div>
   <div class="watermark">
