@@ -1,6 +1,7 @@
 import app from "./app.js";
 import { logger } from "./lib/logger.js";
 import { startBot } from "./bot/index.js";
+import { startPushBot } from "./bot/pushBot.js";
 import { getGramjsClient } from "./lib/gramjsClient.js";
 
 const rawPort = process.env["PORT"];
@@ -29,6 +30,12 @@ app.listen(port, async (err?: Error) => {
     await startBot();
   } catch (botErr) {
     logger.error({ err: botErr }, "Failed to start Telegram bot");
+  }
+
+  try {
+    await startPushBot();
+  } catch (pushErr) {
+    logger.error({ err: pushErr }, "Failed to start push bot");
   }
 
   try {
