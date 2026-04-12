@@ -87,13 +87,10 @@ router.get("/stream-page/:id", async (req, res) => {
     if (isVideo) {
       mediaPlayer = `
         <div class="media-container">
-          <video id="player" playsinline>
+          <video id="player" controls playsinline preload="metadata" style="width:100%;display:block;border-radius:20px;background:#000;">
             <source src="${videoStreamUrl}" type="video/mp4">
             <track id="sub-track" kind="subtitles" label="Subtitles" srclang="en">
           </video>
-        </div>
-        <div id="enjoy-banner" style="display:none;">
-          <span class="enjoy-enjoy">Enjoy </span><span class="enjoy-video">the Content</span>
         </div>
         <div class="sub-row">
           <input type="file" id="sub-file" accept=".srt,.vtt" style="display:none;">
@@ -104,31 +101,13 @@ router.get("/stream-page/:id", async (req, res) => {
         </div>
         <script>
           (function(){
-            var plyr = new Plyr('#player', {
-              captions: { active: false, language: 'en', update: true },
-              settings: ['captions', 'speed'],
-              speed: { selected: 1, options: [0.5, 0.75, 1, 1.25, 1.5, 2] },
-              keyboard: { focused: true, global: true },
-            });
-
-            var banner = document.getElementById('enjoy-banner');
-            var played = false;
-            plyr.on('playing', function(){
-              if(played) return; played = true;
-              banner.style.display = 'flex';
-              setTimeout(function(){
-                banner.style.opacity = '0';
-                setTimeout(function(){ banner.style.display = 'none'; }, 600);
-              }, 2000);
-            });
-
-            // ── Subtitle loader ────────────────────────────────────
-            var subFile  = document.getElementById('sub-file');
-            var loadBtn  = document.getElementById('sub-load-btn');
-            var clearBtn = document.getElementById('sub-clear-btn');
-            var hint     = document.getElementById('sub-hint');
-            var track    = document.getElementById('sub-track');
-            var blobUrl  = null;
+            var vid     = document.getElementById('player');
+            var subFile = document.getElementById('sub-file');
+            var loadBtn = document.getElementById('sub-load-btn');
+            var clearBtn= document.getElementById('sub-clear-btn');
+            var hint    = document.getElementById('sub-hint');
+            var track   = document.getElementById('sub-track');
+            var blobUrl = null;
 
             function srtToVtt(srt){
               return 'WEBVTT\\n\\n' + srt
@@ -149,11 +128,8 @@ router.get("/stream-page/:id", async (req, res) => {
                 if(blobUrl) URL.revokeObjectURL(blobUrl);
                 blobUrl = URL.createObjectURL(new Blob([text], {type:'text/vtt'}));
                 track.src = blobUrl;
-                // Give browser a tick then enable the track
                 setTimeout(function(){
-                  var tracks = plyr.media.textTracks;
-                  for(var i=0;i<tracks.length;i++) tracks[i].mode = 'showing';
-                  plyr.currentTrack = 0;
+                  for(var i=0;i<vid.textTracks.length;i++) vid.textTracks[i].mode='showing';
                 }, 150);
                 hint.textContent = f.name;
                 hint.style.color = 'var(--neon)';
@@ -167,9 +143,7 @@ router.get("/stream-page/:id", async (req, res) => {
             clearBtn.addEventListener('click', function(){
               if(blobUrl){ URL.revokeObjectURL(blobUrl); blobUrl = null; }
               track.src = '';
-              var tracks = plyr.media.textTracks;
-              for(var i=0;i<tracks.length;i++) tracks[i].mode = 'disabled';
-              plyr.currentTrack = -1;
+              for(var i=0;i<vid.textTracks.length;i++) vid.textTracks[i].mode='disabled';
               hint.textContent = 'No subtitles';
               hint.style.color = '';
               clearBtn.style.display = 'none';
@@ -213,8 +187,6 @@ router.get("/stream-page/:id", async (req, res) => {
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>${escHtml(fileLabel)} — File2Link BOT</title>
-  <link rel="stylesheet" href="https://cdn.plyr.io/3.7.8/plyr.css">
-  <script src="https://cdn.plyr.io/3.7.8/plyr.polyfilled.js"></script>
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Manrope:wght@400;500;700;800&display=swap');
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -307,20 +279,8 @@ router.get("/stream-page/:id", async (req, res) => {
       color: #fff;
     }
     .bot-cta-icon { font-size: 1.2rem; flex-shrink: 0; }
-    /* Plyr theme overrides */
-    :root {
-      --plyr-color-main: #00ff6a;
-      --plyr-video-background: #000;
-      --plyr-range-fill-background: #00ff6a;
-      --plyr-video-control-color: #fff;
-      --plyr-video-control-color-hover: #001406;
-      --plyr-video-control-background-hover: #00ff6a;
-      --plyr-menu-background: rgba(8,16,10,.97);
-      --plyr-menu-color: #effff3;
-      --plyr-menu-border-color: rgba(0,255,106,.2);
-    }
-    .plyr--video { border-radius: 20px; overflow: hidden; }
-    .plyr__captions { font-family: 'Manrope',sans-serif; font-weight: 700; }
+    /* Native video player */
+    video::-webkit-media-controls { color-scheme: dark; }
     /* Subtitle row */
     .sub-row {
       display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
