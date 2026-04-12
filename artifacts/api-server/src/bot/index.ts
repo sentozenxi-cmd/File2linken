@@ -11,6 +11,8 @@ export const bot = new Telegraf(BOT_TOKEN);
 
 function getBaseUrl(): string {
   if (process.env.BASE_URL) return process.env.BASE_URL;
+  const devDomain = process.env.REPLIT_DEV_DOMAIN;
+  if (devDomain) return `https://${devDomain}`;
   return `http://localhost:${process.env.PORT || 8080}`;
 }
 
