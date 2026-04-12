@@ -82,75 +82,14 @@ router.get("/stream-page/:id", async (req, res) => {
     const isAudio = file.isAudio || file.mimeType?.startsWith("audio/") || file.fileType === "audio" || file.fileType === "voice";
     const isImage = file.mimeType?.startsWith("image/") || file.fileType === "photo" || file.fileType === "sticker";
 
-    const subSearchUrl = `https://www.opensubtitles.com/en/search-all/q-${encodeURIComponent(fileLabel || "")}`;
     let mediaPlayer = "";
     if (isVideo) {
       mediaPlayer = `
         <div class="media-container">
-          <video id="player" controls playsinline preload="metadata" style="width:100%;display:block;border-radius:20px;background:#000;">
+          <video controls playsinline preload="metadata" style="width:100%;display:block;border-radius:20px;background:#000;">
             <source src="${videoStreamUrl}" type="video/mp4">
-            <track id="sub-track" kind="subtitles" label="Subtitles" srclang="en">
           </video>
-        </div>
-        <div class="sub-row">
-          <input type="file" id="sub-file" accept=".srt,.vtt" style="display:none;">
-          <span class="sub-hint" id="sub-hint">No subtitles</span>
-          <button class="sub-load-btn" id="sub-load-btn">📂 Load from disk</button>
-          <button class="sub-clear-btn" id="sub-clear-btn" style="display:none;">✕ Clear</button>
-          <a class="sub-search-link" href="${subSearchUrl}" target="_blank" rel="noopener">🔍 Find online</a>
-        </div>
-        <script>
-          (function(){
-            var vid     = document.getElementById('player');
-            var subFile = document.getElementById('sub-file');
-            var loadBtn = document.getElementById('sub-load-btn');
-            var clearBtn= document.getElementById('sub-clear-btn');
-            var hint    = document.getElementById('sub-hint');
-            var track   = document.getElementById('sub-track');
-            var blobUrl = null;
-
-            function srtToVtt(srt){
-              return 'WEBVTT\\n\\n' + srt
-                .replace(/\\r\\n/g,'\\n').replace(/\\r/g,'\\n')
-                .replace(/(\\d{2}:\\d{2}:\\d{2}),(\\d{3})/g,'$1.$2')
-                .trim();
-            }
-
-            loadBtn.addEventListener('click', function(){ subFile.click(); });
-
-            subFile.addEventListener('change', function(){
-              var f = this.files[0];
-              if(!f) return;
-              var reader = new FileReader();
-              reader.onload = function(e){
-                var text = e.target.result;
-                if(!f.name.toLowerCase().endsWith('.vtt')) text = srtToVtt(text);
-                if(blobUrl) URL.revokeObjectURL(blobUrl);
-                blobUrl = URL.createObjectURL(new Blob([text], {type:'text/vtt'}));
-                track.src = blobUrl;
-                setTimeout(function(){
-                  for(var i=0;i<vid.textTracks.length;i++) vid.textTracks[i].mode='showing';
-                }, 150);
-                hint.textContent = f.name;
-                hint.style.color = 'var(--neon)';
-                loadBtn.style.display  = 'none';
-                clearBtn.style.display = 'inline-flex';
-              };
-              reader.readAsText(f, 'UTF-8');
-              this.value = '';
-            });
-
-            clearBtn.addEventListener('click', function(){
-              if(blobUrl){ URL.revokeObjectURL(blobUrl); blobUrl = null; }
-              track.src = '';
-              for(var i=0;i<vid.textTracks.length;i++) vid.textTracks[i].mode='disabled';
-              hint.textContent = 'No subtitles';
-              hint.style.color = '';
-              clearBtn.style.display = 'none';
-              loadBtn.style.display  = 'inline-flex';
-            });
-          })();
-        </script>`;
+        </div>`;
     } else if (isAudio) {
       const unsupportedAudio = ["audio/ac3", "audio/eac3", "audio/x-ac3", "audio/truehd", "audio/dts", "audio/x-dts"];
       const canPlayInBrowser = !unsupportedAudio.includes(file.mimeType || "");
@@ -254,13 +193,6 @@ router.get("/stream-page/:id", async (req, res) => {
     }
     .tag.hot { color: #001406; background: linear-gradient(135deg, var(--neon), var(--neon-2)); border-color: transparent; }
     .media-container { margin: 22px 0; border-radius: 22px; overflow: hidden; border: 1px solid rgba(0,255,106,.14); background: #000; position: relative; }
-    #enjoy-banner {
-      padding: 14px 0 4px; display: flex; align-items: center; justify-content: center;
-      font-family: 'Manrope',sans-serif; font-size: 1.5rem; letter-spacing: .4px;
-      transition: opacity .6s ease;
-    }
-    .enjoy-enjoy { color: #fff; font-weight: 700; }
-    .enjoy-video { color: var(--neon); font-weight: 800; }
     .bot-cta {
       display: flex; align-items: center; gap: 10px;
       margin-top: 22px; padding: 14px 20px;
@@ -279,39 +211,7 @@ router.get("/stream-page/:id", async (req, res) => {
       color: #fff;
     }
     .bot-cta-icon { font-size: 1.2rem; flex-shrink: 0; }
-    /* Native video player */
     video::-webkit-media-controls { color-scheme: dark; }
-    /* Subtitle row */
-    .sub-row {
-      display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
-      margin: 6px 0 16px;
-    }
-    .sub-hint {
-      font-family: 'Manrope',sans-serif; font-size: .78rem; font-weight: 600;
-      color: var(--muted); flex: 1; min-width: 0;
-      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-      transition: color .2s;
-    }
-    .sub-load-btn, .sub-clear-btn {
-      display: inline-flex; align-items: center; gap: 5px;
-      padding: 5px 13px; border-radius: 999px; cursor: pointer;
-      font-family: 'Manrope',sans-serif; font-size: .76rem; font-weight: 700;
-      transition: all .15s; white-space: nowrap;
-    }
-    .sub-load-btn {
-      background: transparent; border: 1px solid rgba(0,255,106,.3); color: var(--muted);
-    }
-    .sub-load-btn:hover { border-color: var(--neon); color: var(--neon); background: rgba(0,255,106,.06); }
-    .sub-clear-btn {
-      background: rgba(255,107,107,.1); border: 1px solid rgba(255,107,107,.3); color: #ff6b6b;
-    }
-    .sub-clear-btn:hover { background: rgba(255,107,107,.2); border-color: #ff6b6b; }
-    .sub-search-link {
-      font-family: 'Manrope',sans-serif; font-size: .76rem; font-weight: 700;
-      color: var(--muted); text-decoration: none; white-space: nowrap;
-      transition: color .15s;
-    }
-    .sub-search-link:hover { color: var(--neon); }
     .bot-cta-btn {
       flex-shrink: 0;
       padding: 5px 13px;
