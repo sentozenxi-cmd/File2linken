@@ -10,8 +10,7 @@ const LOG_CHANNEL_ID = process.env.LOG_CHANNEL_ID!;
 export const bot = new Telegraf(BOT_TOKEN);
 
 function getBaseUrl(): string {
-  const domain = process.env.REPLIT_DOMAINS?.split(",")[0];
-  if (domain) return `https://${domain}`;
+  if (process.env.BASE_URL) return process.env.BASE_URL;
   return `http://localhost:${process.env.PORT || 8080}`;
 }
 
