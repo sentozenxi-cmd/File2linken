@@ -1,0 +1,173 @@
+You are working on an EXISTING project that is already functional.
+
+IMPORTANT:
+This project already works. Your job is to MODIFY and PREPARE it for deployment — NOT rebuild it.
+
+-----------------------------------
+CRITICAL RULES (DO NOT BREAK)
+-----------------------------------
+
+- DO NOT rewrite the entire codebase
+- DO NOT remove working logic
+- DO NOT break existing functionality
+- ONLY make necessary modifications
+
+If unsure about any part → ASK before changing
+
+-----------------------------------
+GOAL
+-----------------------------------
+
+Adapt the existing project to:
+
+1. Run backend on Railway (instead of Replit)
+2. Keep MTProto streaming working
+3. Prepare project for GitHub deployment
+4. Cleanly separate frontend and backend if needed
+
+-----------------------------------
+STEP 1 — ANALYZE EXISTING CODE
+-----------------------------------
+
+- Identify:
+  • Backend files (server, MTProto logic)
+  • Frontend files (UI)
+  • Telegram bot logic
+  • Streaming routes
+
+Explain what each part currently does BEFORE modifying anything.
+
+-----------------------------------
+STEP 2 — MINIMAL CHANGES PLAN
+-----------------------------------
+
+Create a plan:
+
+- What needs to change for Railway?
+- What needs to stay untouched?
+- Any hardcoded Replit URLs → replace
+- Ensure server uses:
+  process.env.PORT
+
+DO NOT code yet.
+
+-----------------------------------
+STEP 3 — MODIFY SAFELY
+-----------------------------------
+
+Apply ONLY these changes:
+
+1. Server Fix (REQUIRED)
+
+Ensure server runs like:
+
+```js
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => console.log("Server running"));
+```
+
+-----------------------------------
+
+2. REMOVE REPLIT DEPENDENCY
+
+- Remove:
+  - Replit dev URLs
+  - Replit-specific hosting logic
+
+- Replace with:
+  Railway-compatible URLs
+
+-----------------------------------
+
+3. KEEP MTProto LOGIC INTACT
+
+- DO NOT modify:
+  • gramJS logic
+  • streaming logic
+  • chunk handling
+
+Only adjust if absolutely necessary
+
+-----------------------------------
+
+4. UPDATE API ROUTES (if needed)
+
+Ensure:
+
+/api/file?id=
+/api/download?id=
+
+work correctly for external access
+
+-----------------------------------
+
+5. FRONTEND UPDATE
+
+- Replace API base URL with:
+  https://<railway-domain>
+
+- Keep UI design unchanged
+
+-----------------------------------
+
+STEP 4 — GITHUB PREPARATION
+-----------------------------------
+
+Prepare project for GitHub:
+
+- Ensure clean folder structure
+- Add:
+  package.json (if missing/fix scripts)
+  .gitignore
+
+Add start script:
+
+"start": "node server.js"
+
+-----------------------------------
+
+STEP 5 — RAILWAY READY
+-----------------------------------
+
+Ensure:
+
+- Uses process.env.PORT
+- No local-only dependencies
+- All env variables listed:
+
+TELEGRAM_API_ID
+TELEGRAM_API_HASH
+SESSION_STRING
+BOT_TOKEN
+
+-----------------------------------
+
+STEP 6 — GITHUB PUSH
+-----------------------------------
+
+Initialize git and push:
+
+IF authentication required:
+Ask user:
+"Please provide GitHub Personal Access Token"
+
+-----------------------------------
+
+STEP 7 — FINAL OUTPUT
+-----------------------------------
+
+Provide:
+
+1. List of changes made (clear)
+2. Files modified
+3. Deployment steps:
+   - Push to GitHub
+   - Deploy on Railway
+4. What NOT to change in future
+
+-----------------------------------
+
+REMEMBER:
+This is NOT a new build.
+
+You are upgrading an existing working system safely.
