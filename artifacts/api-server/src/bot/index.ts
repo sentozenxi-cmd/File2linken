@@ -285,8 +285,8 @@ function formatDuration(secs: number): string {
   return `${m}:${String(s).padStart(2, "0")}`;
 }
 
-export async function startBot(): Promise<void> {
+export function startBot(): void {
   logger.info("Starting Telegram bot...");
-  await bot.launch();
+  bot.launch().catch((err) => logger.error({ err }, "Main bot crashed"));
   logger.info("Telegram bot started");
 }

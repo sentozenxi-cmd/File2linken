@@ -210,12 +210,12 @@ if (pushBot) {
   });
 }
 
-export async function startPushBot(): Promise<void> {
+export function startPushBot(): void {
   if (!pushBot) {
     logger.warn("PUSH_BOT_TOKEN not set — push bot disabled");
     return;
   }
   logger.info("Starting push bot...");
-  await pushBot.launch();
+  pushBot.launch().catch((err) => logger.error({ err }, "Push bot crashed"));
   logger.info("Push bot started");
 }

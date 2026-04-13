@@ -26,17 +26,8 @@ app.listen(port, async (err?: Error) => {
 
   logger.info({ port }, "Server listening");
 
-  try {
-    await startBot();
-  } catch (botErr) {
-    logger.error({ err: botErr }, "Failed to start Telegram bot");
-  }
-
-  try {
-    await startPushBot();
-  } catch (pushErr) {
-    logger.error({ err: pushErr }, "Failed to start push bot");
-  }
+  startBot();
+  startPushBot();
 
   try {
     await getGramjsClient();

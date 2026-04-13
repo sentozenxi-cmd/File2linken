@@ -8,7 +8,7 @@ const router: IRouter = Router();
 
 router.use(healthRouter);
 router.use(filesRouter);
-router.use("/api", broadcastsRouter);
+router.use(broadcastsRouter);
 
 export default router;
 
