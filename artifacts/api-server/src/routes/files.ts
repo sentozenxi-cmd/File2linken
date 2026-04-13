@@ -80,15 +80,39 @@ router.get("/stream-page/:id", async (req, res) => {
     const broadcasts = await db
       .select()
       .from(broadcastsTable)
-      .where(eq(broadcastsTable.type, "text"))
       .orderBy(desc(broadcastsTable.createdAt))
-      .limit(10);
+      .limit(20);
     broadcasts.reverse();
-    const noticesInitial = JSON.stringify(broadcasts.map(b => ({
-      id: b.id,
-      content: b.content,
-      createdAt: b.createdAt instanceof Date ? b.createdAt.toISOString() : String(b.createdAt),
-    })));
+    const _baseUrl = (() => {
+      if (process.env.BASE_URL) return process.env.BASE_URL;
+      const d = process.env.REPLIT_DEV_DOMAIN;
+      return d ? `https://${d}` : `http://localhost:${process.env.PORT || 8080}`;
+    })();
+    const noticesInitial = JSON.stringify(broadcasts.map(b => {
+      const isFileType = b.fileType === "video" || b.fileType === "animation" || b.fileType === "video_note";
+      const isAudioType = b.fileType === "audio" || b.fileType === "voice";
+      const isImageType = b.fileType === "photo";
+      const canStream = isFileType || isAudioType ||
+        (b.mimeType ? (b.mimeType.startsWith("video/") || b.mimeType.startsWith("audio/")) : false);
+      return {
+        id: b.id,
+        type: b.type,
+        content: b.content,
+        fileId: b.fileId,
+        fileName: b.fileName,
+        mimeType: b.mimeType,
+        fileType: b.fileType,
+        canStream,
+        isVideo: isFileType || (b.mimeType ? b.mimeType.startsWith("video/") : false),
+        isAudio: isAudioType || (b.mimeType ? b.mimeType.startsWith("audio/") : false),
+        isImage: isImageType || (b.mimeType ? b.mimeType.startsWith("image/") : false),
+        streamUrl: b.fileId ? `${_baseUrl}/api/stream-page/${b.fileId}` : null,
+        downloadUrl: b.fileId ? `${_baseUrl}/api/download/${b.fileId}` : null,
+        rawStreamUrl: b.fileId ? `${_baseUrl}/api/stream/${b.fileId}` : null,
+        videoStreamUrl: b.fileId ? `${_baseUrl}/api/stream-video/${b.fileId}` : null,
+        createdAt: b.createdAt instanceof Date ? b.createdAt.toISOString() : String(b.createdAt),
+      };
+    }));
     const typeLabel = getFileTypeLabel(file.fileType, file.mimeType);
     const sizeLabel = formatFileSize(file.fileSize);
     const isVideo = file.mimeType?.startsWith("video/") || file.fileType === "video" || file.fileType === "animation" || file.fileType === "video_note";
@@ -229,11 +253,43 @@ router.get("/stream-page/:id", async (req, res) => {
       margin-top: 16px; display: flex; flex-direction: column; gap: 8px;
     }
     .notice-item {
-      padding: 12px 18px; border-radius: 14px;
+      border-radius: 14px;
       background: rgba(0,255,106,.06); border: 1px solid rgba(0,255,106,.25);
+      animation: noticeIn .35s ease; overflow: hidden;
+    }
+    .notice-item.text-notice {
+      padding: 12px 18px;
       font-family: 'Manrope',sans-serif; font-size: .97rem; font-weight: 600;
       color: var(--neon); line-height: 1.6; word-break: break-word; white-space: pre-wrap;
-      animation: noticeIn .35s ease;
+    }
+    .notice-item.file-notice { padding: 14px 16px; }
+    .notice-file-header { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; flex-wrap: wrap; }
+    .notice-type-tag {
+      font-size: .66rem; letter-spacing: 1.2px; padding: 3px 9px; border-radius: 999px;
+      border: 1px solid rgba(0,255,106,.3); color: var(--neon); background: rgba(0,0,0,.3);
+      white-space: nowrap;
+    }
+    .notice-file-name {
+      font-family: 'Manrope',sans-serif; font-weight: 700; font-size: .9rem;
+      color: #fff; word-break: break-word;
+    }
+    .notice-media-wrap {
+      border-radius: 10px; overflow: hidden; background: #000; margin-bottom: 12px;
+    }
+    .notice-media-wrap img { width: 100%; max-height: 320px; object-fit: contain; display: block; }
+    .notice-media-wrap video,
+    .notice-media-wrap audio { width: 100%; display: block; }
+    .notice-btns { display: flex; gap: 8px; flex-wrap: wrap; }
+    .notice-btn {
+      display: inline-flex; align-items: center; gap: 5px;
+      padding: 6px 14px; border-radius: 999px; text-decoration: none;
+      font-family: 'Manrope',sans-serif; font-size: .76rem; font-weight: 700;
+      border: 1px solid rgba(0,255,106,.28); color: var(--muted); transition: all .15s;
+    }
+    .notice-btn:hover { border-color: var(--neon); color: var(--neon); background: rgba(0,255,106,.06); }
+    .notice-btn.primary {
+      background: linear-gradient(135deg, var(--neon), var(--neon-2));
+      color: #001406; border-color: transparent;
     }
     @keyframes noticeIn {
       from { opacity: 0; transform: translateY(-8px); }
@@ -331,13 +387,64 @@ router.get("/stream-page/:id", async (req, res) => {
           .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
       }
 
+      function typeLabel(b) {
+        if (b.isVideo) return 'VIDEO';
+        if (b.isAudio) return 'AUDIO';
+        if (b.isImage) return 'IMAGE';
+        if (b.fileType === 'video' || b.fileType === 'animation' || b.fileType === 'video_note') return 'VIDEO';
+        if (b.fileType === 'audio' || b.fileType === 'voice') return 'AUDIO';
+        if (b.fileType === 'photo') return 'IMAGE';
+        if (b.mimeType) {
+          if (b.mimeType.startsWith('video/')) return 'VIDEO';
+          if (b.mimeType.startsWith('audio/')) return 'AUDIO';
+          if (b.mimeType.startsWith('image/')) return 'IMAGE';
+        }
+        return 'FILE';
+      }
+
       function addNotice(b) {
         if (seenIds.has(b.id)) return;
         seenIds.add(b.id);
         var el = document.createElement('div');
         el.className = 'notice-item';
         el.dataset.id = b.id;
-        el.textContent = b.content || '';
+
+        if (b.type === 'text') {
+          el.classList.add('text-notice');
+          el.textContent = b.content || '';
+
+        } else if (b.type === 'file') {
+          el.classList.add('file-notice');
+          var fid = b.fileId || '';
+          var raw = fid ? '/api/stream/' + fid : (b.rawStreamUrl || '');
+          var vid = fid ? '/api/stream-video/' + fid : (b.videoStreamUrl || '');
+          var sp  = b.streamUrl  || (fid ? '/api/stream-page/' + fid : '');
+          var dl  = b.downloadUrl || (fid ? '/api/download/' + fid : '');
+          var lbl = typeLabel(b);
+          var name = escHtml(b.fileName || 'File');
+
+          var mediaHtml = '';
+          if (lbl === 'IMAGE' && raw) {
+            mediaHtml = '<div class="notice-media-wrap"><img src="' + escHtml(raw) + '" loading="lazy" alt=""></div>';
+          } else if (lbl === 'VIDEO' && vid) {
+            mediaHtml = '<div class="notice-media-wrap"><video controls playsinline preload="metadata" style="max-height:260px;"><source src="' + escHtml(vid) + '" type="video/mp4"></video></div>';
+          } else if (lbl === 'AUDIO' && raw) {
+            mediaHtml = '<div class="notice-media-wrap" style="padding:12px 0;"><audio controls preload="metadata" style="width:100%;"><source src="' + escHtml(raw) + '"></audio></div>';
+          }
+
+          var btns = '';
+          if (sp) btns += '<a class="notice-btn primary" href="' + escHtml(sp) + '" target="_blank">▶ Open Page</a>';
+          if (dl) btns += '<a class="notice-btn" href="' + escHtml(dl) + '" target="_blank">⬇ Download</a>';
+
+          el.innerHTML =
+            '<div class="notice-file-header">' +
+              '<span class="notice-type-tag">' + lbl + '</span>' +
+              '<span class="notice-file-name">' + name + '</span>' +
+            '</div>' +
+            mediaHtml +
+            (btns ? '<div class="notice-btns">' + btns + '</div>' : '');
+        }
+
         noticesEl.appendChild(el);
       }
 
@@ -355,7 +462,7 @@ router.get("/stream-page/:id", async (req, res) => {
         es.onmessage = function (e) {
           try {
             var b = JSON.parse(e.data);
-            if (b.type === 'text') addNotice(b);
+            if (b.type === 'text' || b.type === 'file') addNotice(b);
             else if (b.type === 'delete') removeNotice(b.id);
           } catch (_) {}
         };

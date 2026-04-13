@@ -66,7 +66,6 @@ if (pushBot) {
       const items = await db
         .select()
         .from(broadcastsTable)
-        .where(eq(broadcastsTable.type, "text"))
         .orderBy(desc(broadcastsTable.createdAt))
         .limit(20);
 
