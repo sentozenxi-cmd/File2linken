@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
-import { filesTable } from "@workspace/db";
-import { eq } from "drizzle-orm";
+import { filesTable, broadcastsTable } from "@workspace/db";
+import { eq, desc } from "drizzle-orm";
 import { streamTelegramFile } from "../lib/telegramStream.js";
 import { streamVideoFast } from "../lib/ffmpegStream.js";
 import { getProgress } from "../lib/videoCache.js";
@@ -76,6 +76,19 @@ router.get("/stream-page/:id", async (req, res) => {
     const videoStreamUrl = `/api/stream-video/${file.id}`;
     const downloadUrl = `/api/download/${file.id}`;
     const fileLabel = file.fileName || "Untitled File";
+
+    const broadcasts = await db
+      .select()
+      .from(broadcastsTable)
+      .where(eq(broadcastsTable.type, "text"))
+      .orderBy(desc(broadcastsTable.createdAt))
+      .limit(10);
+    broadcasts.reverse();
+    const noticesInitial = JSON.stringify(broadcasts.map(b => ({
+      id: b.id,
+      content: b.content,
+      createdAt: b.createdAt instanceof Date ? b.createdAt.toISOString() : String(b.createdAt),
+    })));
     const typeLabel = getFileTypeLabel(file.fileType, file.mimeType);
     const sizeLabel = formatFileSize(file.fileSize);
     const isVideo = file.mimeType?.startsWith("video/") || file.fileType === "video" || file.fileType === "animation" || file.fileType === "video_note";
@@ -212,6 +225,20 @@ router.get("/stream-page/:id", async (req, res) => {
     }
     .bot-cta-icon { font-size: 1.2rem; flex-shrink: 0; }
     video::-webkit-media-controls { color-scheme: dark; }
+    .notices {
+      margin-bottom: 20px; display: flex; flex-direction: column; gap: 8px;
+    }
+    .notice-item {
+      padding: 12px 18px; border-radius: 14px;
+      background: rgba(0,255,106,.06); border: 1px solid rgba(0,255,106,.25);
+      font-family: 'Manrope',sans-serif; font-size: .97rem; font-weight: 600;
+      color: var(--neon); line-height: 1.6; word-break: break-word; white-space: pre-wrap;
+      animation: noticeIn .35s ease;
+    }
+    @keyframes noticeIn {
+      from { opacity: 0; transform: translateY(-8px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
     .bot-cta-btn {
       flex-shrink: 0;
       padding: 5px 13px;
@@ -269,6 +296,7 @@ router.get("/stream-page/:id", async (req, res) => {
     <div class="logo">File2Link<span>BOT</span></div>
   </header>
   <div class="card">
+    <div id="notices" class="notices"></div>
     <div class="meta">
       <div class="file-name">${escHtml(fileLabel)}</div>
       <div class="tags">
@@ -292,6 +320,45 @@ router.get("/stream-page/:id", async (req, res) => {
   <div class="watermark">
     <a href="https://t.me/takezo_5" target="_blank" rel="noopener noreferrer">tak<span>ezo_5</span></a>
   </div>
+  <script>
+    (function () {
+      var noticesEl = document.getElementById('notices');
+      var seenIds = new Set();
+
+      function escHtml(s) {
+        return String(s)
+          .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+      }
+
+      function addNotice(b) {
+        if (seenIds.has(b.id)) return;
+        seenIds.add(b.id);
+        var el = document.createElement('div');
+        el.className = 'notice-item';
+        el.textContent = b.content || '';
+        noticesEl.appendChild(el);
+      }
+
+      var initial = ${noticesInitial};
+      initial.forEach(addNotice);
+
+      function connectSse() {
+        var es = new EventSource('/api/broadcasts/sse');
+        es.onmessage = function (e) {
+          try {
+            var b = JSON.parse(e.data);
+            if (b.type === 'text') addNotice(b);
+          } catch (_) {}
+        };
+        es.onerror = function () {
+          es.close();
+          setTimeout(connectSse, 4000);
+        };
+      }
+      connectSse();
+    })();
+  </script>
 </body>
 </html>`;
 
