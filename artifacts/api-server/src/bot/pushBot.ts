@@ -1,6 +1,7 @@
 import { Telegraf } from "telegraf";
 import { db, filesTable, broadcastsTable } from "@workspace/db";
-import { eq } from "drizzle-orm";
+import { eq, inArray, desc } from "drizzle-orm";
+import type { BroadcastRecord } from "@workspace/db";
 import { isStreamable, isAudio, generateFileId } from "../lib/fileUtils.js";
 import { logger } from "../lib/logger.js";
 import { broadcastSse } from "../lib/sseClients.js";
@@ -9,6 +10,9 @@ const PUSH_BOT_TOKEN = process.env.PUSH_BOT_TOKEN;
 const LOG_CHANNEL_ID = process.env.LOG_CHANNEL_ID!;
 
 export const pushBot = PUSH_BOT_TOKEN ? new Telegraf(PUSH_BOT_TOKEN) : null;
+
+type ClearState = { step: "awaitingSelection"; items: BroadcastRecord[] };
+const clearStates = new Map<number, ClearState>();
 
 function getBaseUrl(): string {
   if (process.env.BASE_URL) return process.env.BASE_URL;
@@ -37,11 +41,101 @@ async function forwardToLogChannel(
 
 if (pushBot) {
   pushBot.start(async (ctx) => {
-    await ctx.reply("✅ Push bot ready. Send me a message or file to broadcast it to the site.");
+    await ctx.reply(
+      "✅ Push bot ready.\n\n" +
+      "Send me any text or file to broadcast it to every stream page.\n\n" +
+      "Commands:\n" +
+      "/clear — choose which messages to remove\n" +
+      "/cancel — cancel current operation",
+    );
+  });
+
+  pushBot.command("cancel", async (ctx) => {
+    const userId = ctx.from.id;
+    if (clearStates.has(userId)) {
+      clearStates.delete(userId);
+      await ctx.reply("❌ Operation cancelled.");
+    } else {
+      await ctx.reply("Nothing to cancel.");
+    }
+  });
+
+  pushBot.command("clear", async (ctx) => {
+    const userId = ctx.from.id;
+    try {
+      const items = await db
+        .select()
+        .from(broadcastsTable)
+        .where(eq(broadcastsTable.type, "text"))
+        .orderBy(desc(broadcastsTable.createdAt))
+        .limit(20);
+
+      if (items.length === 0) {
+        await ctx.reply("📭 No messages on the stream pages right now.");
+        return;
+      }
+
+      clearStates.set(userId, { step: "awaitingSelection", items });
+
+      const list = items
+        .map((b, i) => {
+          const preview = (b.content || "").slice(0, 60).replace(/\n/g, " ");
+          return `${i + 1}. ${preview}${(b.content || "").length > 60 ? "…" : ""}`;
+        })
+        .join("\n");
+
+      await ctx.reply(
+        `📋 Current messages on the stream pages:\n\n${list}\n\n` +
+        `Reply with the number(s) to remove (e.g. 1  or  1,3  or  all)\n` +
+        `or /cancel to do nothing.`,
+      );
+    } catch (err) {
+      logger.error({ err }, "Push bot: /clear error");
+      await ctx.reply("❌ Failed to fetch messages.");
+    }
   });
 
   pushBot.on("message", async (ctx) => {
     const msg = ctx.message as any;
+    const userId = ctx.from?.id;
+    if (!userId) return;
+
+    const state = clearStates.get(userId);
+
+    if (state && msg.text) {
+      clearStates.delete(userId);
+
+      const input = msg.text.trim().toLowerCase();
+      const { items } = state;
+      let toRemove: BroadcastRecord[] = [];
+
+      if (input === "all") {
+        toRemove = items;
+      } else {
+        const nums = input.split(/[\s,]+/).map(Number).filter((n) => !isNaN(n) && n >= 1 && n <= items.length);
+        if (nums.length === 0) {
+          await ctx.reply("⚠️ Invalid input. Type numbers like 1 or 1,2,3 or all. Use /clear to try again.");
+          return;
+        }
+        toRemove = nums.map((n) => items[n - 1]!);
+      }
+
+      try {
+        const ids = toRemove.map((b) => b.id);
+        await db.delete(broadcastsTable).where(inArray(broadcastsTable.id, ids));
+        for (const b of toRemove) {
+          broadcastSse({ type: "delete", id: b.id });
+        }
+        const names = toRemove
+          .map((b, i) => `${i + 1}. ${(b.content || "").slice(0, 50)}${(b.content || "").length > 50 ? "…" : ""}`)
+          .join("\n");
+        await ctx.reply(`✅ Removed ${toRemove.length} message(s) from the stream pages:\n\n${names}`);
+      } catch (err) {
+        logger.error({ err }, "Push bot: delete error");
+        await ctx.reply("❌ Failed to remove messages.");
+      }
+      return;
+    }
 
     if (msg.text && !msg.text.startsWith("/")) {
       try {

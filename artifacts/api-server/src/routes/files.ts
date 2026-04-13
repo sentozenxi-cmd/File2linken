@@ -226,7 +226,7 @@ router.get("/stream-page/:id", async (req, res) => {
     .bot-cta-icon { font-size: 1.2rem; flex-shrink: 0; }
     video::-webkit-media-controls { color-scheme: dark; }
     .notices {
-      margin-bottom: 20px; display: flex; flex-direction: column; gap: 8px;
+      margin-top: 16px; display: flex; flex-direction: column; gap: 8px;
     }
     .notice-item {
       padding: 12px 18px; border-radius: 14px;
@@ -296,7 +296,6 @@ router.get("/stream-page/:id", async (req, res) => {
     <div class="logo">File2Link<span>BOT</span></div>
   </header>
   <div class="card">
-    <div id="notices" class="notices"></div>
     <div class="meta">
       <div class="file-name">${escHtml(fileLabel)}</div>
       <div class="tags">
@@ -316,6 +315,7 @@ router.get("/stream-page/:id", async (req, res) => {
       <span style="flex:1;">Convert Telegram files into instant download &amp; streaming links</span>
       <span class="bot-cta-btn">Open Bot</span>
     </a>
+    <div id="notices" class="notices"></div>
   </div>
   <div class="watermark">
     <a href="https://t.me/takezo_5" target="_blank" rel="noopener noreferrer">tak<span>ezo_5</span></a>
@@ -336,8 +336,15 @@ router.get("/stream-page/:id", async (req, res) => {
         seenIds.add(b.id);
         var el = document.createElement('div');
         el.className = 'notice-item';
+        el.dataset.id = b.id;
         el.textContent = b.content || '';
         noticesEl.appendChild(el);
+      }
+
+      function removeNotice(id) {
+        var el = noticesEl.querySelector('[data-id="' + id + '"]');
+        if (el) el.remove();
+        seenIds.delete(id);
       }
 
       var initial = ${noticesInitial};
@@ -349,6 +356,7 @@ router.get("/stream-page/:id", async (req, res) => {
           try {
             var b = JSON.parse(e.data);
             if (b.type === 'text') addNotice(b);
+            else if (b.type === 'delete') removeNotice(b.id);
           } catch (_) {}
         };
         es.onerror = function () {
